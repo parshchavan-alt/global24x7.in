@@ -1,0 +1,57 @@
+[
+  {
+    "id": "page-privacy-policy",
+    "slug": "privacy-policy",
+    "title": "Privacy Policy",
+    "content": "# Privacy Policy for Global 24x7\n\n*Effective Date: January 1, 2026*\n\nAt **Global 24x7** (accessible via our primary domain and network), the privacy of our international readers and subscribers is of paramount importance. This Privacy Policy document outlines the types of information that is collected and recorded by Global 24x7 and how we use it.\n\n## 1. Information We Collect\nWhen you browse Global 24x7, we collect standard log information including internet protocol (IP) addresses, browser type, Internet Service Provider (ISP), date/time stamps, referring/exit pages, and number of clicks. This data is not linked to any information that is personally identifiable.\n\n## 2. Google AdSense & DoubleClick DART Cookies\nGoogle is a third-party vendor on our site. It uses cookies, known as DART cookies, to serve ads to our site visitors based upon their visit to our site and other sites on the internet. Readers may opt out of the use of DART cookies by visiting the Google ad and content network Privacy Policy.\n\n## 3. Data Protection Rights (GDPR & CCPA)\nUnder applicable international data protection regulations, you have the right to request access to, correction of, or deletion of your personal data.\n\n## 4. Editorial Integrity & Contact\nIf you have additional questions or require more information about our Privacy Policy, do not hesitate to contact our legal bureau at `legal@global24x7.com`.",
+    "metaTitle": "Privacy Policy | Global 24x7 News Network",
+    "metaDescription": "Official Privacy Policy and data protection disclosures for Global 24x7 international digital news portal.",
+    "isSystem": true,
+    "published": true,
+    "updatedAt": "2026-10-17T08:00:00.000Z"
+  },
+  {
+    "id": "page-terms-of-service",
+    "slug": "terms-of-service",
+    "title": "Terms of Service",
+    "content": "# Terms of Service for Global 24x7\n\n*Effective Date: January 1, 2026*\n\nWelcome to **Global 24x7**. By accessing or using our website, APIs, or syndication feeds, you agree to be bound by these Terms of Service.\n\n## 1. Intellectual Property & Syndication\nAll text, research syntheses, graphical assets, and broadsheet layout systems published on Global 24x7 are protected by international copyright laws. Non-commercial quoting is permitted with explicit attribution and a direct canonical backlink.\n\n## 2. Disclaimer of Warranties\nAll dispatches, financial commentary, and technological analyses are provided for informational and journalistic purposes only. Global 24x7 does not offer licensed investment, legal, or medical advice.\n\n## 3. Governing Law\nThese Terms shall be interpreted in accordance with international digital media standards.",
+    "metaTitle": "Terms of Service | Global 24x7 News Network",
+    "metaDescription": "Terms and conditions governing the use of Global 24x7 dispatches, content syndication, and editorial portal.",
+    "isSystem": true,
+    "published": true,
+    "updatedAt": "2026-10-17T08:00:00.000Z"
+  },
+  {
+    "id": "page-editorial-guidelines",
+    "slug": "editorial-guidelines",
+    "title": "Editorial Standards & AI Transparency",
+    "content": "# Editorial Standards & AI Disclosure\n\nAt **Global 24x7**, we believe in unvarnished factual reporting, intellectual depth, and complete transparency.\n\n## 1. Editorial Charter\nOur correspondents adhere to strict journalistic standards:\n- Verification of empirical claims through primary data sources.\n- Multi-perspective neutrality without political or corporate capture.\n- Distinction between factual reporting and analytical opinion dispatches.\n\n## 2. Machine Intelligence & Verification\nGlobal 24x7 leverages cutting-edge generative intelligence to synthesize breaking wires, translate dispatches across English and Hindi, and structure deep research into broadsheet formats. Every automated synthesis is subject to algorithmic fact-verification protocols and human editorial oversight.",
+    "metaTitle": "Editorial Standards & AI Disclosure | Global 24x7",
+    "metaDescription": "Editorial charter, fact-checking policies, and machine intelligence disclosures for Global 24x7.",
+    "isSystem": true,
+    "published": true,
+    "updatedAt": "2026-10-17T08:00:00.000Z"
+  },
+  {
+    "id": "page-about-us",
+    "slug": "about-us",
+    "title": "About Global 24x7",
+    "content": "# About Global 24x7\n\n**Global 24x7** is a 24-hour, independent digital publication committed to delivering continuous international news, deep investigative reporting, and evergreen analytical intelligence.\n\n## Our Mission\nIn an era of superficial soundbites, Global 24x7 provides thoughtful broadsheet journalism. From quantum engineering to macroeconomic monetary policy, our desks report the structural forces shaping the modern world in both English and Hindi.\n\n## Global Bureau Contacts\n- **Editorial Desk**: `desk@global24x7.com`\n- **Syndication**: `syndication@global24x7.com`\n- **Press Room**: `press@global24x7.com`",
+    "metaTitle": "About Global 24x7 | 24-Hour International Broadsheet",
+    "metaDescription": "Learn about Global 24x7, our international newsrooms, editorial charter, and commitment to 24/7 world intelligence.",
+    "isSystem": true,
+    "published": true,
+    "updatedAt": "2026-10-17T08:00:00.000Z"
+  },
+  {
+    "id": "page-contact-us",
+    "slug": "contact-us",
+    "title": "Contact Bureau",
+    "content": "# Contact Global 24x7 Bureau\n\nWe welcome correspondence from readers, whistleblowers, and syndication partners worldwide.\n\n### Newsroom Inquiries\n- **General Editorial**: `editor@global24x7.com`\n- **Corrections & Retractions**: `corrections@global24x7.com`\n- **Hindi Editorial Desk (हिन्दी)**: `hindi@global24x7.com`\n\n### Business & Advertising\n- **AdSense & Commercial Sponsorships**: `commercial@global24x7.com`\n- **Syndication Feeds**: `syndication@global24x7.com`",
+    "metaTitle": "Contact Global 24x7 Bureau | Editorial & News Desk",
+    "metaDescription": "Reach the Global 24x7 editorial bureau, newsroom desks, corrections, and commercial partnerships.",
+    "isSystem": true,
+    "published": true,
+    "updatedAt": "2026-10-17T08:00:00.000Z"
+  }
+]

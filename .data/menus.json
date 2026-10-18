@@ -1,0 +1,18 @@
+{
+  "headerMenu": [
+    { "id": "hm-1", "label": "All News", "url": "/", "order": 1 },
+    { "id": "hm-2", "label": "Technology", "url": "/category/technology", "order": 2 },
+    { "id": "hm-3", "label": "Economy", "url": "/category/economy", "order": 3 },
+    { "id": "hm-4", "label": "Science", "url": "/category/science", "order": 4 },
+    { "id": "hm-5", "label": "Global Affairs", "url": "/category/global-affairs", "order": 5 },
+    { "id": "hm-6", "label": "Hindi (हिन्दी)", "url": "/hi", "order": 6 },
+    { "id": "hm-7", "label": "About", "url": "/page/about-us", "order": 7 }
+  ],
+  "footerMenu": [
+    { "id": "fm-1", "label": "Editorial Guidelines", "url": "/page/editorial-guidelines", "order": 1 },
+    { "id": "fm-2", "label": "Privacy Policy", "url": "/page/privacy-policy", "order": 2 },
+    { "id": "fm-3", "label": "Terms of Service", "url": "/page/terms-of-service", "order": 3 },
+    { "id": "fm-4", "label": "Contact Bureau", "url": "/page/contact-us", "order": 4 },
+    { "id": "fm-5", "label": "About Global 24x7", "url": "/page/about-us", "order": 5 }
+  ]
+}

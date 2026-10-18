@@ -1,0 +1,39 @@
+name: Global 24x7 Autonomous 24/7 Publishing Engine
+
+on:
+  schedule:
+    # Runs every hour at minute 0 (24 times a day, 100% free on GitHub Actions)
+    - cron: '0 * * * *'
+  workflow_dispatch: # Allows 1-click manual trigger anytime from GitHub Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  publish-article:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run Autonomous Article Generation
+        run: node scripts/auto-publish.js
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Commit & Push New Article to Trigger Cloudflare Build
+        run: |
+          git config --global user.name "Global 24x7 Publishing Bot"
+          git config --global user.email "bot@global24x7.news"
+          git add src/data/seedArticles.ts .data/articles.json 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "No new changes to commit."
+          else
+            git commit -m "Auto-publish new dispatch: $(date -u +'%Y-%m-%d %H:%M UTC') [skip ci]"
+            git push origin main
+          fi

@@ -1,0 +1,10 @@
+[
+  { "id": "cat-1", "name": "World", "slug": "world", "description": "Geopolitics, diplomacy, international governance", "isSystem": true },
+  { "id": "cat-2", "name": "Technology", "slug": "technology", "description": "Computing, artificial intelligence, micro-architecture", "isSystem": true },
+  { "id": "cat-3", "name": "Business", "slug": "business", "description": "Macroeconomics, capital allocation, trade corridors", "isSystem": true },
+  { "id": "cat-4", "name": "Science", "slug": "science", "description": "Astrophysics, quantum mechanics, deep biological research", "isSystem": true },
+  { "id": "cat-5", "name": "Health", "slug": "health", "description": "Molecular therapies, preventative clinical longevity", "isSystem": true },
+  { "id": "cat-6", "name": "Climate", "slug": "climate", "description": "Energy transition, ecological monitoring, infrastructure", "isSystem": true },
+  { "id": "cat-7", "name": "Culture", "slug": "culture", "description": "Civic architecture, literature, exhibitions", "isSystem": true },
+  { "id": "cat-8", "name": "Sports", "slug": "sports", "description": "Endurance biomechanics, athletics analytics", "isSystem": true }
+]

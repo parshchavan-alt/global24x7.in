@@ -1,0 +1,7 @@
+{
+  "customCss": "/* Global 24x7 Custom CSS Stylesheet */\n/* .font-editorial-serif { letter-spacing: -0.015em; } */",
+  "headHtml": "<!-- Global 24x7 Head Injections (AdSense / Analytics / Meta) -->",
+  "headerHtml": "",
+  "afterArticleHtml": "",
+  "footerHtml": ""
+}

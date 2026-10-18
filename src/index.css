@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Playfair Display", Georgia, serif;
+  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  --font-prose: "Lora", Georgia, serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  background-color: #FBF9F5;
+  color: #1C1917;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-editorial-serif {
+  font-family: "Playfair Display", Georgia, serif;
+}
+
+.font-editorial-prose {
+  font-family: "Lora", Georgia, serif;
+}
+
+/* Custom drop-cap styling for broadsheet article reading */
+.first-letter-dropcap::first-letter {
+  font-family: "Playfair Display", Georgia, serif;
+  float: left;
+  font-size: 3.5rem;
+  line-height: 0.8;
+  margin-top: 0.25rem;
+  margin-right: 0.6rem;
+  font-weight: 700;
+  color: #1C1917;
+}
+
+/* Smooth scrolling and print styling */
+html {
+  scroll-behavior: smooth;
+}

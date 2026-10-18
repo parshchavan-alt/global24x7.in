@@ -1,0 +1,6 @@
+{
+  "name": "Global 24x7",
+  "description": "Global 24x7 delivers continuous 24/7 world news, investigative dispatches, and evergreen pillar guides across Technology, Markets, Science, and Global Affairs in English and Hindi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

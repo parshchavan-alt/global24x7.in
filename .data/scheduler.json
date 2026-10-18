@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "frequencyMinutes": 60,
+  "naturalJitter": true,
+  "topicStrategy": "balanced",
+  "categoriesInRotation": [
+    "Technology",
+    "Economy",
+    "Global Affairs",
+    "Science",
+    "Markets",
+    "Opinion"
+  ],
+  "autoPublish": true,
+  "languageMode": "both",
+  "articlesGeneratedCount": 1,
+  "nextRunTimestamp": "2026-10-18T19:30:00.000Z",
+  "lastRunTimestamp": "2026-10-18T18:30:00.000Z"
+}

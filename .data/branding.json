@@ -1,0 +1,44 @@
+{
+  "siteName": "Global 24x7",
+  "tagline": "Continuous World News, In-Depth Dispatches & Evergreen Market Intelligence",
+  "editionText": "Global 24x7 Digital Edition • 24/7 Live Feed",
+  "logoUrl": "",
+  "aboutText": "Global 24x7 is an independent, 24-hour international digital broadsheet delivering rigorous reporting, investigative analysis, and timeless guides across Technology, Economy, Science, and World Affairs.",
+  "copyrightText": "© 2026 Global 24x7 News Network. All rights reserved.",
+  "complianceNotice": "Google AdSense & Schema.org Compliant Broadsheet Architecture",
+  "attributionNotice": "Photography pre-cleared via Unsplash & NASA Public Domain with SEO metadata",
+  "socialLinks": {
+    "twitter": "https://twitter.com",
+    "facebook": "https://facebook.com",
+    "linkedin": "https://linkedin.com",
+    "youtube": "",
+    "telegram": ""
+  },
+  "footerLinks": [
+    {
+      "id": "fl-1",
+      "label": "Editorial Guidelines",
+      "url": "/page/editorial-guidelines"
+    },
+    {
+      "id": "fl-2",
+      "label": "Privacy Policy",
+      "url": "/page/privacy-policy"
+    },
+    {
+      "id": "fl-3",
+      "label": "Terms of Service",
+      "url": "/page/terms-of-service"
+    },
+    {
+      "id": "fl-4",
+      "label": "Contact Bureau",
+      "url": "/page/contact-us"
+    },
+    {
+      "id": "fl-5",
+      "label": "About Global 24x7",
+      "url": "/page/about-us"
+    }
+  ]
+}
