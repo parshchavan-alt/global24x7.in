@@ -17,6 +17,7 @@ import {
   Image as ImageIcon,
   Compass,
   AlertTriangle,
+  Database,
 } from 'lucide-react';
 import {
   Article,
@@ -35,6 +36,7 @@ import { AutoSchedulerPanel } from './AutoSchedulerPanel';
 import { AnalyticsPanel } from './AnalyticsPanel';
 import { SEOSuitePanel } from './SEOSuitePanel';
 import { CloudflareExportPanel } from './CloudflareExportPanel';
+import { CloudflareD1Panel } from './CloudflareD1Panel';
 import { CustomCodeManager } from './CustomCodeManager';
 import { SiteBrandingManager } from './SiteBrandingManager';
 import { MediaManagerPanel } from './MediaManagerPanel';
@@ -101,6 +103,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     | 'analytics'
     | 'seo'
     | 'cloudflare'
+    | 'cloudflare-d1'
     | 'security'
   >('scheduler');
 
@@ -224,14 +227,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-stone-950 shrink-0" />
             <span>
-              <strong>URGENT SECURITY NOTICE:</strong> Your editorial portal is currently using the factory default password (<code>admin2026</code>). Anyone visiting your website could potentially access this admin panel. Please change it now!
+              <strong>SECURITY NOTICE:</strong> Your editorial portal is currently using the factory default passcode. Please update your master passcode to secure access to your newsroom.
             </span>
           </div>
           <button
             onClick={() => setActiveTab('security')}
             className="px-3 py-1 bg-stone-900 text-white rounded text-[11px] font-mono hover:bg-stone-800 transition-colors cursor-pointer shrink-0"
           >
-            Update Passcode Now →
+            Update Master Passcode →
           </button>
         </div>
       )}
@@ -250,7 +253,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             { id: 'custom-code', label: 'Custom HTML & CSS', icon: Code },
             { id: 'analytics', label: 'Audience Analytics', icon: BarChart3 },
             { id: 'seo', label: 'SEO & AdSense', icon: Globe },
-            { id: 'cloudflare', label: 'Cloudflare / GitHub', icon: Cloud },
+            { id: 'cloudflare-d1', label: 'Cloudflare D1 DB', icon: Database },
+            { id: 'cloudflare', label: 'Static Export', icon: Cloud },
             { id: 'security', label: 'Security Posture', icon: Shield },
           ].map((item) => {
             const active = activeTab === item.id;
@@ -339,6 +343,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             />
           )}
           {activeTab === 'cloudflare' && <CloudflareExportPanel articles={articles} />}
+          {activeTab === 'cloudflare-d1' && <CloudflareD1Panel />}
           {activeTab === 'security' && (
             <div className="space-y-6">
               <div className="pb-4 border-b border-stone-200">

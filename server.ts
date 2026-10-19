@@ -21,6 +21,16 @@ import {
   AdSenseConfig,
   AIFineTuningConfig,
 } from './src/types';
+import { resolveArticleImage } from './src/utils/imageService';
+import {
+  queueD1ArticleSync,
+  queueD1CustomCodeSync,
+  queueD1BrandingSync,
+  queueD1AdSenseSync,
+  isD1Configured,
+  loadArticlesFromD1,
+  queryD1,
+} from './src/utils/cloudflareD1';
 
 dotenv.config();
 
@@ -58,6 +68,8 @@ if (!fs.existsSync(DATA_DIR)) {
 // -------------------------------------------------------------
 // ADMINISTRATIVE AUTHENTICATION & SECURE PERSISTENCE
 // -------------------------------------------------------------
+const SESSION_SECRET = process.env.SESSION_SECRET || 'global24x7-prod-session-key-2026-v1';
+
 interface AuthConfig {
   passcodeHash: string;
   salt: string;
@@ -75,7 +87,7 @@ try {
   if (fs.existsSync(AUTH_CONFIG_FILE)) {
     authConfig = JSON.parse(fs.readFileSync(AUTH_CONFIG_FILE, 'utf-8'));
     if (!authConfig.sessionSecret) {
-      authConfig.sessionSecret = crypto.randomBytes(32).toString('hex');
+      authConfig.sessionSecret = SESSION_SECRET;
       fs.writeFileSync(AUTH_CONFIG_FILE, JSON.stringify(authConfig, null, 2));
     }
   } else {
@@ -84,7 +96,7 @@ try {
     authConfig = {
       passcodeHash: hashPasscode(defaultPasscode, salt),
       salt,
-      sessionSecret: crypto.randomBytes(32).toString('hex'),
+      sessionSecret: SESSION_SECRET,
       isDefault: !process.env.ADMIN_PASSCODE,
       updatedAt: new Date().toISOString(),
     };
@@ -92,11 +104,12 @@ try {
   }
 } catch {
   const salt = crypto.randomBytes(16).toString('hex');
+  const defaultPasscode = process.env.ADMIN_PASSCODE || 'admin2026';
   authConfig = {
-    passcodeHash: hashPasscode('admin2026', salt),
+    passcodeHash: hashPasscode(defaultPasscode, salt),
     salt,
-    sessionSecret: crypto.randomBytes(32).toString('hex'),
-    isDefault: true,
+    sessionSecret: SESSION_SECRET,
+    isDefault: !process.env.ADMIN_PASSCODE,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -113,10 +126,10 @@ function createAdminToken(): string {
   const payload = Buffer.from(
     JSON.stringify({
       role: 'admin',
-      exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      exp: Date.now() + 14 * 24 * 60 * 60 * 1000,
     })
   ).toString('base64url');
-  const sig = crypto.createHmac('sha256', authConfig.sessionSecret).update(payload).digest('base64url');
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
   return `${payload}.${sig}`;
 }
 
@@ -126,7 +139,7 @@ function verifyAdminToken(token?: string): boolean {
     const parts = token.split('.');
     if (parts.length !== 2) return false;
     const [payloadB64, sig] = parts;
-    const expectedSig = crypto.createHmac('sha256', authConfig.sessionSecret).update(payloadB64).digest('base64url');
+    const expectedSig = crypto.createHmac('sha256', SESSION_SECRET).update(payloadB64).digest('base64url');
     if (sig !== expectedSig) return false;
     const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf-8'));
     if (payload.exp && Date.now() > payload.exp) return false;
@@ -136,6 +149,17 @@ function verifyAdminToken(token?: string): boolean {
   }
 }
 
+function checkAdminPasscode(passcodeCandidate?: string): boolean {
+  if (!passcodeCandidate || typeof passcodeCandidate !== 'string') return false;
+  const trimmed = passcodeCandidate.trim();
+  if (!trimmed) return false;
+  if (process.env.ADMIN_PASSCODE && trimmed === process.env.ADMIN_PASSCODE) {
+    return true;
+  }
+  const testHash = hashPasscode(trimmed, authConfig.salt);
+  return testHash === authConfig.passcodeHash;
+}
+
 const failedAttemptsMap = new Map<string, { count: number; lockedUntil: number }>();
 
 function requireAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -143,6 +167,18 @@ function requireAdminAuth(req: express.Request, res: express.Response, next: exp
     (req.headers['x-admin-token'] as string) ||
     (req.headers['authorization']?.replace(/^Bearer\s+/i, ''));
   if (verifyAdminToken(headerToken)) {
+    return next();
+  }
+  // Secondary check: passcode header passed by authenticated client
+  const passcodeHeader =
+    (req.headers['x-admin-passcode'] as string) ||
+    (req.body && typeof req.body === 'object' ? req.body.__adminPasscode : '');
+  if (passcodeHeader && checkAdminPasscode(passcodeHeader)) {
+    try {
+      const refreshedToken = createAdminToken();
+      res.setHeader('x-refreshed-admin-token', refreshedToken);
+      res.setHeader('Access-Control-Expose-Headers', 'x-refreshed-admin-token');
+    } catch {}
     return next();
   }
   return res.status(401).json({
@@ -443,6 +479,7 @@ try {
 function saveCustomCode() {
   try {
     fs.writeFileSync(CUSTOM_CODE_FILE, JSON.stringify(customCode, null, 2));
+    queueD1CustomCodeSync(customCode);
   } catch (err) {
     console.error('Failed to save custom code:', err);
   }
@@ -463,6 +500,7 @@ try {
 function saveBranding() {
   try {
     fs.writeFileSync(BRANDING_FILE, JSON.stringify(branding, null, 2));
+    queueD1BrandingSync(branding);
   } catch (err) {
     console.error('Failed to save branding:', err);
   }
@@ -494,6 +532,7 @@ try {
 function saveAdSenseConfig() {
   try {
     fs.writeFileSync(ADSENSE_FILE, JSON.stringify(adSenseConfig, null, 2));
+    queueD1AdSenseSync(adSenseConfig);
   } catch (err) {
     console.error('Failed to save adsense config:', err);
   }
@@ -890,20 +929,30 @@ Strict JSON Output Schema:
     };
   }
 
-  const stockPool = CURATED_STOCK_PHOTOS[cat] || CURATED_STOCK_PHOTOS.Technology;
-  const photoCandidate = stockPool[Math.floor(Math.random() * stockPool.length)];
   const slug = (generatedData.title || 'dispatch')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)+/g, '');
   const id = `art-${Date.now()}`;
 
-  const { localUrl } = await downloadAndSaveImageLocally(
-    photoCandidate.url,
-    slug,
+  const imageMode = (fineTuningConfig.imageGenerationMode || schedulerConfig.imageGenerationMode || 'hybrid') as any;
+  const resolvedVisual = resolveArticleImage(
     cat,
-    generatedData.title
+    generatedData.title,
+    generatedData.tags || [],
+    imageMode
   );
+
+  let finalImageUrl = resolvedVisual.url;
+  try {
+    const { localUrl } = await downloadAndSaveImageLocally(
+      resolvedVisual.url,
+      slug,
+      cat,
+      generatedData.title
+    );
+    if (localUrl) finalImageUrl = localUrl;
+  } catch {}
 
   const englishArticle: Article = {
     id,
@@ -922,9 +971,9 @@ Strict JSON Output Schema:
     readingTimeMinutes: generatedData.readingTimeMinutes || 4,
     status: schedulerConfig.autoPublish ? 'published' : 'draft',
     featuredRank: 2,
-    imageUrl: localUrl,
-    imageCaption: photoCandidate.caption,
-    imageCredit: photoCandidate.credit,
+    imageUrl: finalImageUrl,
+    imageCaption: resolvedVisual.caption,
+    imageCredit: resolvedVisual.credit,
     language: 'en',
     viewsCount: 1,
     likesCount: 0,
@@ -938,6 +987,7 @@ Strict JSON Output Schema:
 
   articles.unshift(englishArticle);
   saveArticles();
+  queueD1ArticleSync(englishArticle);
 
   let hindiArticle: Article | undefined = undefined;
   if (schedulerConfig.languageMode === 'both') {
@@ -1580,11 +1630,55 @@ app.post('/api/auth/change-passcode', requireAdminAuth, (req, res) => {
   });
 });
 
+app.post('/api/auth/sync-credentials', (req, res) => {
+  const { savedPasscode } = req.body || {};
+  if (!savedPasscode || typeof savedPasscode !== 'string' || savedPasscode.trim().length < 6) {
+    return res.status(400).json({ success: false, error: 'Passcode must be at least 6 characters' });
+  }
+
+  // If server is currently running default factory passcode, allow auto-restoring
+  // the client's configured passcode so Render container restarts don't lose the user's password
+  if (authConfig.isDefault) {
+    const newSalt = crypto.randomBytes(16).toString('hex');
+    authConfig.salt = newSalt;
+    authConfig.passcodeHash = hashPasscode(savedPasscode.trim(), newSalt);
+    authConfig.isDefault = false;
+    authConfig.updatedAt = new Date().toISOString();
+    saveAuthConfig();
+    const token = createAdminToken();
+    return res.json({
+      success: true,
+      restored: true,
+      token,
+      message: 'Master passcode re-synchronized from client credentials.',
+      isDefault: false,
+    });
+  }
+
+  // If server already has a non-default password, verify if it matches
+  const matches = checkAdminPasscode(savedPasscode);
+  if (matches) {
+    const token = createAdminToken();
+    return res.json({
+      success: true,
+      restored: false,
+      token,
+      isDefault: false,
+    });
+  }
+
+  return res.status(401).json({
+    success: false,
+    error: 'Provided passcode does not match current server security policy.',
+  });
+});
+
 app.get('/api/auth/status', (req, res) => {
   const headerToken =
     (req.headers['x-admin-token'] as string) ||
     (req.headers['authorization']?.replace(/^Bearer\s+/i, ''));
-  const authenticated = verifyAdminToken(headerToken);
+  const passcodeHeader = req.headers['x-admin-passcode'] as string;
+  const authenticated = verifyAdminToken(headerToken) || (passcodeHeader ? checkAdminPasscode(passcodeHeader) : false);
   res.json({
     authenticated,
     isDefault: authConfig.isDefault,
@@ -1623,6 +1717,83 @@ app.post('/api/fine-tuning', requireAdminAuth, (req, res) => {
   fineTuningConfig = { ...fineTuningConfig, ...update };
   saveFineTuningConfig();
   res.json({ success: true, config: fineTuningConfig });
+});
+
+// -------------------------------------------------------------
+// CLOUDFLARE D1 DATABASE INTEGRATION ENDPOINTS
+// -------------------------------------------------------------
+app.get('/api/d1/status', (_req, res) => {
+  res.json({
+    configured: isD1Configured(),
+    accountIdSet: Boolean(process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_ACCOUNT_ID),
+    databaseIdSet: Boolean(process.env.CLOUDFLARE_D1_DATABASE_ID || process.env.CF_D1_DATABASE_ID),
+    apiTokenSet: Boolean(process.env.CLOUDFLARE_API_TOKEN || process.env.CF_API_TOKEN),
+  });
+});
+
+app.post('/api/d1/sync-all', requireAdminAuth, async (_req, res) => {
+  if (!isD1Configured()) {
+    return res.status(400).json({
+      success: false,
+      error: 'Cloudflare D1 credentials missing. Set CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_D1_DATABASE_ID, and CLOUDFLARE_API_TOKEN in Render environment variables.',
+    });
+  }
+
+  try {
+    for (const art of articles) {
+      queueD1ArticleSync(art);
+    }
+    queueD1CustomCodeSync(customCode);
+    queueD1BrandingSync(branding);
+    queueD1AdSenseSync(adSenseConfig);
+
+    res.json({
+      success: true,
+      message: `Triggered background synchronization of ${articles.length} articles and configurations to Cloudflare D1.`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/d1/restore-all', requireAdminAuth, async (_req, res) => {
+  if (!isD1Configured()) {
+    return res.status(400).json({
+      success: false,
+      error: 'Cloudflare D1 credentials missing. Please set environment variables.',
+    });
+  }
+
+  try {
+    const d1Articles = await loadArticlesFromD1();
+    let count = 0;
+    if (d1Articles && d1Articles.length > 0) {
+      articles = d1Articles;
+      saveArticles();
+      count = d1Articles.length;
+    }
+
+    const d1Custom = await queryD1('SELECT * FROM custom_code WHERE id = ?;', ['global_custom_code']);
+    if (d1Custom.success && d1Custom.results?.[0]) {
+      const row: any = d1Custom.results[0];
+      customCode = {
+        customCss: row.custom_css || '',
+        headHtml: row.head_html || '',
+        headerHtml: row.header_html || '',
+        afterArticleHtml: row.after_article_html || '',
+        footerHtml: row.footer_html || '',
+      };
+      saveCustomCode();
+    }
+
+    res.json({
+      success: true,
+      restoredArticlesCount: count,
+      message: `Successfully restored ${count} articles and settings from Cloudflare D1.`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.post('/api/pages', requireAdminAuth, (req, res) => {
@@ -1871,20 +2042,30 @@ Strict JSON schema:
       };
     }
 
-    const stockPool = CURATED_STOCK_PHOTOS[category] || CURATED_STOCK_PHOTOS.Technology;
-    const randomPhoto = stockPool[Math.floor(Math.random() * stockPool.length)];
     const id = `art-${Date.now()}`;
     const slug = (generatedData.title || 'article')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)+/g, '');
 
-    const { localUrl } = await downloadAndSaveImageLocally(
-      randomPhoto.url,
-      slug,
+    const imageMode = (req.body.imageMode || fineTuningConfig.imageGenerationMode || 'hybrid') as any;
+    const resolvedVisual = resolveArticleImage(
       category,
-      generatedData.title
+      generatedData.title,
+      generatedData.tags || [],
+      imageMode
     );
+
+    let finalImageUrl = resolvedVisual.url;
+    try {
+      const { localUrl } = await downloadAndSaveImageLocally(
+        resolvedVisual.url,
+        slug,
+        category,
+        generatedData.title
+      );
+      if (localUrl) finalImageUrl = localUrl;
+    } catch {}
 
     const newArticle: Article = {
       id,
@@ -1903,9 +2084,9 @@ Strict JSON schema:
       readingTimeMinutes: generatedData.readingTimeMinutes || 4,
       status: req.body.autoPublish ? 'published' : 'draft',
       featuredRank: 3,
-      imageUrl: localUrl,
-      imageCaption: randomPhoto.caption,
-      imageCredit: randomPhoto.credit,
+      imageUrl: finalImageUrl,
+      imageCaption: resolvedVisual.caption,
+      imageCredit: resolvedVisual.credit,
       language: targetLanguage === 'hi' ? 'hi' : 'en',
       viewsCount: 1,
       likesCount: 0,
@@ -1918,6 +2099,7 @@ Strict JSON schema:
 
     articles.unshift(newArticle);
     saveArticles();
+    queueD1ArticleSync(newArticle);
 
     res.json({
       success: true,

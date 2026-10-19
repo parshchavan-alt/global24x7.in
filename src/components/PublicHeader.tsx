@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Lock, X, Menu } from 'lucide-react';
+import { Search, X, Menu } from 'lucide-react';
 import { SupportedLanguage, CustomCategory, SiteBrandingConfig } from '../types';
 import { UI_TRANSLATIONS } from '../constants/languages';
 
@@ -127,16 +127,6 @@ export const PublicHeader: React.FC<PublicHeaderProps> = ({
               हिन्दी
             </button>
           </div>
-
-          {/* Editorial / Admin Portal Trigger */}
-          <button
-            onClick={onOpenAdmin}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-stone-900 hover:bg-stone-800 rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <Lock className="w-3 h-3 text-stone-300" />
-            <span className="hidden sm:inline">{t.adminAccess}</span>
-            <span className="sm:hidden">Admin</span>
-          </button>
 
           {/* Mobile hamburger menu */}
           <button

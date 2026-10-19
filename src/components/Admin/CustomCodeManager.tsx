@@ -20,6 +20,9 @@ export const CustomCodeManager: React.FC<CustomCodeManagerProps> = ({
   }, [config]);
 
   const handleSave = () => {
+    try {
+      localStorage.setItem('global24x7_custom_code', JSON.stringify(form));
+    } catch {}
     onSaveConfig(form);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);

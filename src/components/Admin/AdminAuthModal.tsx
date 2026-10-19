@@ -49,6 +49,27 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({
         setError(null);
         onAuthenticated(data.isDefault);
       } else {
+        // If server rebooted to factory default and returned 401, attempt to auto-sync the entered passcode
+        try {
+          const syncRes = await fetch('/api/auth/sync-credentials', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ savedPasscode: passcode }),
+          });
+          const syncData = await syncRes.json();
+          if (syncRes.ok && syncData.success && syncData.token) {
+            sessionStorage.setItem('chronicle_admin_session', syncData.token);
+            sessionStorage.setItem('chronicle_admin_session_expiry', (Date.now() + 14 * 86400 * 1000).toString());
+            localStorage.setItem('chronicle_admin_token', syncData.token);
+            localStorage.setItem('chronicle_admin_passcode', passcode);
+            onLogSecurityEvent('Admin Login', 'success', 'Authenticated and synced credentials');
+            setPasscode('');
+            setError(null);
+            onAuthenticated(false);
+            return;
+          }
+        } catch {}
+
         const errMsg = data.error || 'Invalid master passcode. Access denied.';
         setError(errMsg);
         if (res.status === 429) {

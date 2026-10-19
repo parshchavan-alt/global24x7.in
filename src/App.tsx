@@ -78,12 +78,18 @@ export function App() {
   });
 
   // Custom Code
-  const [customCodeConfig, setCustomCodeConfig] = useState<CustomCodeConfig>({
-    customCss: `/* Global 24x7 Broadsheet CSS */\n/* .font-editorial-serif { letter-spacing: -0.015em; } */`,
-    headHtml: `<!-- Global 24x7 Head Injections (AdSense / Analytics / Meta) -->`,
-    headerHtml: ``,
-    afterArticleHtml: ``,
-    footerHtml: ``,
+  const [customCodeConfig, setCustomCodeConfig] = useState<CustomCodeConfig>(() => {
+    try {
+      const saved = localStorage.getItem('global24x7_custom_code');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {
+      customCss: `/* Global 24x7 Broadsheet CSS */\n/* .font-editorial-serif { letter-spacing: -0.015em; } */`,
+      headHtml: `<!-- Global 24x7 Head Injections (AdSense / Analytics / Meta) -->`,
+      headerHtml: ``,
+      afterArticleHtml: ``,
+      footerHtml: ``,
+    };
   });
 
   // Fine-Tuning
@@ -348,12 +354,39 @@ export function App() {
       })
       .catch(() => {});
 
-    // 3. Custom Code
+    // 3. Custom Code (with local preservation across container restarts)
     fetch('/api/custom-code')
       .then((r) => r.json())
       .then((data) => {
+        const localSaved = localStorage.getItem('global24x7_custom_code');
+        if (localSaved) {
+          try {
+            const parsed = JSON.parse(localSaved);
+            const hasCustomEdits =
+              Boolean(parsed.headerHtml?.trim()) ||
+              Boolean(parsed.afterArticleHtml?.trim()) ||
+              Boolean(parsed.footerHtml?.trim()) ||
+              (parsed.customCss && !parsed.customCss.includes('Broadsheet CSS')) ||
+              (parsed.headHtml && !parsed.headHtml.includes('Head Injections (AdSense'));
+            if (hasCustomEdits) {
+              setCustomCodeConfig(parsed);
+              // Re-seed server so server-rendered endpoints also have the custom code
+              fetch('/api/custom-code', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-admin-token': getAdminToken(),
+                  'x-admin-passcode': localStorage.getItem('chronicle_admin_passcode') || '',
+                },
+                body: JSON.stringify(parsed),
+              }).catch(() => {});
+              return;
+            }
+          } catch {}
+        }
         if (data.success && data.customCode) {
           setCustomCodeConfig(data.customCode);
+          localStorage.setItem('global24x7_custom_code', JSON.stringify(data.customCode));
         }
       })
       .catch(() => {});
@@ -393,6 +426,25 @@ export function App() {
     fetch('/api/adsense')
       .then((r) => r.json())
       .then((data) => {
+        const localSaved = localStorage.getItem('global24x7_adsense_config');
+        if (localSaved) {
+          try {
+            const parsed = JSON.parse(localSaved);
+            if (parsed.userConfigured) {
+              setAdSenseConfig(parsed);
+              fetch('/api/adsense', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-admin-token': getAdminToken(),
+                  'x-admin-passcode': localStorage.getItem('chronicle_admin_passcode') || '',
+                },
+                body: JSON.stringify(parsed),
+              }).catch(() => {});
+              return;
+            }
+          } catch {}
+        }
         if (data.success && data.config) {
           setAdSenseConfig(data.config);
           localStorage.setItem('global24x7_adsense_config', JSON.stringify(data.config));
@@ -411,11 +463,31 @@ export function App() {
       })
       .catch(() => {});
 
-    // 9. Auth status check
+    // 9. Auth status check & auto-sync credentials across restarts
+    const savedPasscode = localStorage.getItem('chronicle_admin_passcode');
     const token = getAdminToken();
-    if (token) {
+    if (savedPasscode) {
+      fetch('/api/auth/sync-credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ savedPasscode }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success && data.token) {
+            sessionStorage.setItem('chronicle_admin_session', data.token);
+            sessionStorage.setItem('chronicle_admin_session_expiry', (Date.now() + 14 * 86400 * 1000).toString());
+            localStorage.setItem('chronicle_admin_token', data.token);
+            setIsDefaultPasscode(false);
+          }
+        })
+        .catch(() => {});
+    } else if (token) {
       fetch('/api/auth/status', {
-        headers: { 'x-admin-token': token },
+        headers: {
+          'x-admin-token': token,
+          'x-admin-passcode': localStorage.getItem('chronicle_admin_passcode') || '',
+        },
       })
         .then((r) => r.json())
         .then((data) => {
@@ -435,6 +507,15 @@ export function App() {
       const slug = pathname.replace('/page/', '').replace(/\/$/, '');
       if (slug) setSelectedPageSlug(slug);
     }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'e') {
+        e.preventDefault();
+        handleOpenAdminTrigger();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   // Cadence Runner for autonomous publishing
@@ -999,6 +1080,14 @@ export function App() {
                 <div className="flex items-center gap-4 flex-wrap">
                   <span>{branding.attributionNotice || 'Photography pre-cleared with SEO metadata'}</span>
                   <span>Schema.org NewsArticle Verified</span>
+                  <button
+                    onClick={handleOpenAdminTrigger}
+                    className="text-stone-500 hover:text-stone-300 transition-colors cursor-pointer text-[10px] flex items-center gap-1 opacity-75 hover:opacity-100"
+                    title="Editorial Staff Portal (Ctrl+Alt+E)"
+                  >
+                    <Lock className="w-2.5 h-2.5" />
+                    <span>Staff Portal</span>
+                  </button>
                 </div>
               </div>
             </div>

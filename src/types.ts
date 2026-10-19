@@ -72,6 +72,7 @@ export interface AIFineTuningConfig {
   includeHistoricalContext: boolean;
   includeExpertQuotes: boolean;
   customSystemDirectives: string;
+  imageGenerationMode?: 'ai-generated' | 'curated-press' | 'hybrid';
 }
 
 export interface KeyPoolAccount {
@@ -117,6 +118,7 @@ export interface SchedulerConfig {
   lastRunTimestamp?: string;
   nextRunTimestamp?: string;
   articlesGeneratedCount: number;
+  imageGenerationMode?: 'ai-generated' | 'curated-press' | 'hybrid';
 }
 
 export interface AdSenseConfig {

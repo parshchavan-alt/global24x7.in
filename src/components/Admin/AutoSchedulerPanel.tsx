@@ -142,9 +142,9 @@ export const AutoSchedulerPanel: React.FC<AutoSchedulerPanelProps> = ({
 
   const handleRunNow = async () => {
     setIsRunningCycle(true);
-    setStatusMessage(null);
+    setStatusMessage('Initiating autonomous cycle on newsroom server...');
     try {
-      const res = await safeFetchJson<{
+      let res = await safeFetchJson<{
         success: boolean;
         article?: Article;
         error?: string;
@@ -152,6 +152,26 @@ export const AutoSchedulerPanel: React.FC<AutoSchedulerPanelProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
+
+      // If server returned 401, attempt auto-syncing credentials once and retry
+      if (!res.ok && res.status === 401) {
+        const savedPasscode = localStorage.getItem('chronicle_admin_passcode');
+        if (savedPasscode) {
+          const syncRes = await safeFetchJson('/api/auth/sync-credentials', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ savedPasscode }),
+          });
+          if (syncRes.ok && syncRes.data?.token) {
+            sessionStorage.setItem('chronicle_admin_session', syncRes.data.token);
+            localStorage.setItem('chronicle_admin_token', syncRes.data.token);
+            res = await safeFetchJson('/api/scheduler/run-now', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        }
+      }
 
       if (res.ok && res.data?.success && res.data.article) {
         onArticleGenerated(res.data.article);
@@ -163,7 +183,7 @@ export const AutoSchedulerPanel: React.FC<AutoSchedulerPanelProps> = ({
       const localKeys = getLocalKeys();
       const activeKey = localKeys[0]?.key;
       if (activeKey) {
-        setStatusMessage('Synthesizing scheduled article via client engine...');
+        setStatusMessage('Synthesizing scheduled article via client engine (Gemini 3.8 Flash)...');
         const activeCats = config.categoriesInRotation?.length ? config.categoriesInRotation : categories.map((c) => c.name);
         const randomCat = activeCats[Math.floor(Math.random() * activeCats.length)] || 'Technology';
         const directResult = await generateArticleDirectly(activeKey, randomCat);
@@ -178,7 +198,7 @@ export const AutoSchedulerPanel: React.FC<AutoSchedulerPanelProps> = ({
             status: 'Success (Published)',
             topicType: 'breaking',
             language: 'en',
-            modelUsed: 'gemini-2.5-flash (Client)',
+            modelUsed: 'gemini-3.8-flash (Client)',
             articleId: directResult.article.id,
           };
           setLogs((prev) => [newLog, ...prev]);

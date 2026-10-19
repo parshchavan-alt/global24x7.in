@@ -501,6 +501,52 @@ export const AIFineTuningStudio: React.FC<AIFineTuningStudioProps> = ({
             </div>
           </div>
 
+          <div>
+            <label className="block text-xs font-semibold text-stone-700 mb-2 font-mono uppercase">
+              Article Image & Visual Sourcing Mode
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {[
+                {
+                  id: 'hybrid',
+                  name: 'Hybrid Dynamic (Recommended)',
+                  desc: 'AI visual generation for Tech/Science; Verified Press photo archive for World/Business.',
+                },
+                {
+                  id: 'ai-generated',
+                  name: '100% AI Broadsheet Synthesis',
+                  desc: 'Generates unique cinematic AI photography per article matching the specific headline.',
+                },
+                {
+                  id: 'curated-press',
+                  name: 'International Press Archive',
+                  desc: 'Public domain & Creative Commons photography from Reuters, AP, and Wikimedia wires.',
+                },
+              ].map((m) => {
+                const active = (config.imageGenerationMode || 'hybrid') === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() =>
+                      onUpdateConfig({ ...config, imageGenerationMode: m.id as any })
+                    }
+                    className={`text-left p-3 rounded border transition-colors cursor-pointer ${
+                      active
+                        ? 'border-stone-900 bg-stone-100/80 shadow-xs'
+                        : 'border-stone-200 hover:border-stone-400 bg-white'
+                    }`}
+                  >
+                    <div className="font-bold text-xs text-stone-900 font-mono mb-0.5">
+                      {m.name}
+                    </div>
+                    <p className="text-[11px] text-stone-500 leading-tight">{m.desc}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="space-y-4 p-4 bg-stone-50 border border-stone-200 rounded">
             <div>
               <div className="flex items-center justify-between text-xs mb-1 font-mono">

@@ -5,6 +5,7 @@
  */
 
 import { Article } from '../types';
+import { resolveArticleImage } from './imageService';
 
 export interface DirectTestResult {
   success: boolean;
@@ -19,7 +20,7 @@ export async function testGeminiKeyDirectly(apiKey: string): Promise<DirectTestR
   }
 
   // List of models to try for verification in order
-  const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+  const models = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
   let lastErrorMessage = '';
 
   for (const model of models) {
@@ -86,7 +87,7 @@ export async function generateArticleDirectly(
   apiKey: string,
   category: string,
   topic?: string,
-  model = 'gemini-2.5-flash'
+  model = 'gemini-3.8-flash'
 ): Promise<{ success: boolean; article?: Article; error?: string }> {
   try {
     const isEvergreen = Math.random() > 0.4;
@@ -148,6 +149,8 @@ You MUST respond strictly with valid JSON with this exact schema (no markdown fe
       .replace(/(^-|-$)+/g, '');
     const id = `art-${Date.now()}`;
 
+    const resolvedVisual = resolveArticleImage(cat, parsed.title, parsed.tags || []);
+
     const article: Article = {
       id,
       slug,
@@ -165,9 +168,9 @@ You MUST respond strictly with valid JSON with this exact schema (no markdown fe
       readingTimeMinutes: parsed.readingTimeMinutes || 4,
       status: 'published',
       featuredRank: 2,
-      imageUrl: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1200&q=80',
-      imageCaption: `${cat} editorial analysis and strategic intelligence.`,
-      imageCredit: { photographer: 'Global 24x7 Staff', source: 'Global 24x7', license: 'Editorial' },
+      imageUrl: resolvedVisual.url,
+      imageCaption: resolvedVisual.caption,
+      imageCredit: resolvedVisual.credit,
       language: 'en',
       viewsCount: 1,
       likesCount: 0,
