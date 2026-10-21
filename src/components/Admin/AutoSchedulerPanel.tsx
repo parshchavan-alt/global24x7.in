@@ -8,6 +8,8 @@ import {
   TrendingUp,
   BookOpen,
   Layers,
+  Camera,
+  Globe,
 } from 'lucide-react';
 import {
   SchedulerConfig,
@@ -559,6 +561,75 @@ export const AutoSchedulerPanel: React.FC<AutoSchedulerPanelProps> = ({
                   {strat.badge}
                 </div>
                 <p className="text-[11px] text-stone-500 leading-tight">{strat.desc}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Autonomous Image Strategy */}
+      <div className="p-5 bg-white border border-stone-200 rounded space-y-4 shadow-xs">
+        <div className="flex items-center justify-between border-b border-stone-100 pb-2">
+          <div className="flex items-center gap-2">
+            <Camera className="w-4 h-4 text-stone-800" />
+            <h4 className="text-xs font-bold font-mono uppercase text-stone-900">
+              Autonomous Article Image & Visual Strategy
+            </h4>
+          </div>
+          <span className="text-[11px] font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+            ✓ Scene-Aware AI &bull; Live Wikimedia Press &bull; Auto-Localize
+          </span>
+        </div>
+        <p className="text-xs text-stone-600">
+          Control how images are generated or acquired during autonomous publishing cycles:
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {[
+            {
+              id: 'ai-generated',
+              title: '✨ 100% AI Photojournalism (Recommended)',
+              badge: 'Scene-Aware & Unique per Headline',
+              desc: 'Synthesizes custom broadsheet documentary photography per article, automatically downloaded and saved to your local /media/ storage.',
+              icon: Sparkles,
+            },
+            {
+              id: 'hybrid',
+              title: '⚖️ Smart Editorial Hybrid',
+              badge: 'Real Entities + AI Conceptual',
+              desc: 'Searches live Wikimedia Commons for public figures and named institutions; synthesizes AI scenes for deep technology and analysis.',
+              icon: Layers,
+            },
+            {
+              id: 'curated-press',
+              title: '🌐 Live Wikimedia Press Wire',
+              badge: '100% Copyright-Free CC-BY',
+              desc: 'Dynamically searches and downloads verified public domain press photography matching the article keywords.',
+              icon: Globe,
+            },
+          ].map((mode) => {
+            const active = (config.imageGenerationMode || 'ai-generated') === mode.id;
+            const Icon = mode.icon;
+            return (
+              <button
+                key={mode.id}
+                type="button"
+                onClick={() => updateConfigOnServer({ imageGenerationMode: mode.id as any })}
+                className={`text-left p-4 rounded border transition-colors cursor-pointer ${
+                  active
+                    ? 'border-stone-900 bg-stone-100/90 shadow-xs'
+                    : 'border-stone-200 hover:border-stone-400 bg-white'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-1.5 font-bold text-xs text-stone-900 font-mono">
+                    <Icon className="w-3.5 h-3.5 text-stone-800" />
+                    <span>{mode.title}</span>
+                  </div>
+                </div>
+                <div className="text-[10px] font-mono text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded inline-block mb-1.5">
+                  {mode.badge}
+                </div>
+                <p className="text-[11px] text-stone-500 leading-tight">{mode.desc}</p>
               </button>
             );
           })}

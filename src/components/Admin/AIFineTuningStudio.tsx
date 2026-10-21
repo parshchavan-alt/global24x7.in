@@ -508,19 +508,19 @@ export const AIFineTuningStudio: React.FC<AIFineTuningStudioProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               {[
                 {
-                  id: 'hybrid',
-                  name: 'Hybrid Dynamic (Recommended)',
-                  desc: 'AI visual generation for Tech/Science; Verified Press photo archive for World/Business.',
+                  id: 'ai-generated',
+                  name: '100% AI Photojournalism (Recommended)',
+                  desc: 'Generates unique broadsheet documentary photography per article matching the specific physical scene.',
                 },
                 {
-                  id: 'ai-generated',
-                  name: '100% AI Broadsheet Synthesis',
-                  desc: 'Generates unique cinematic AI photography per article matching the specific headline.',
+                  id: 'hybrid',
+                  name: 'Smart Editorial Hybrid',
+                  desc: 'Live Wikimedia Commons for real leaders/events; AI photojournalism for tech, science, and deep analysis.',
                 },
                 {
                   id: 'curated-press',
-                  name: 'International Press Archive',
-                  desc: 'Public domain & Creative Commons photography from Reuters, AP, and Wikimedia wires.',
+                  name: 'Live Wikimedia Press Wire',
+                  desc: 'Dynamically searches and localizes verified copyright-free CC-BY photography matching headline keywords.',
                 },
               ].map((m) => {
                 const active = (config.imageGenerationMode || 'hybrid') === m.id;

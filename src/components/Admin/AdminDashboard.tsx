@@ -18,6 +18,9 @@ import {
   Compass,
   AlertTriangle,
   Database,
+  FileDown,
+  FileUp,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   Article,
@@ -41,6 +44,7 @@ import { CustomCodeManager } from './CustomCodeManager';
 import { SiteBrandingManager } from './SiteBrandingManager';
 import { MediaManagerPanel } from './MediaManagerPanel';
 import { PagesAndMenuManager } from './PagesAndMenuManager';
+import { authenticatedFetch } from '../../utils/apiSafe';
 
 interface AdminDashboardProps {
   articles: Article[];
@@ -105,6 +109,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     | 'cloudflare'
     | 'cloudflare-d1'
     | 'security'
+    | 'backup'
   >('scheduler');
 
   const [newPasscode, setNewPasscode] = useState('');
@@ -112,6 +117,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [passcodeError, setPasscodeError] = useState<string | null>(null);
   const [isUpdatingPasscode, setIsUpdatingPasscode] = useState(false);
   const [sessionRemainingMinutes, setSessionRemainingMinutes] = useState(15);
+  const [backupMessage, setBackupMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [isExportingBackup, setIsExportingBackup] = useState(false);
+  const [isRestoringBackup, setIsRestoringBackup] = useState(false);
+  const backupInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -181,6 +190,68 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setTimeout(() => setPasscodeSuccess(false), 3000);
     } finally {
       setIsUpdatingPasscode(false);
+    }
+  };
+
+  const handleExportFullBackup = async () => {
+    setIsExportingBackup(true);
+    setBackupMessage({ text: 'Compiling system backup package (.json)...', type: 'info' });
+    try {
+      const res = await authenticatedFetch('/api/backup/export');
+      if (!res.ok) throw new Error('Backup request failed');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `global24x7-full-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      setBackupMessage({ text: '✓ Complete system backup exported and downloaded safely to your computer!', type: 'success' });
+      onLogSecurityEvent('Backup Export', 'success', 'Downloaded full system backup JSON');
+      setTimeout(() => setBackupMessage(null), 5000);
+    } catch (err: any) {
+      setBackupMessage({ text: `Backup export failed: ${err.message}`, type: 'error' });
+    } finally {
+      setIsExportingBackup(false);
+    }
+  };
+
+  const handleRestoreFullBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!confirm(`Restore system backup from "${file.name}"? This will recover all articles, custom code, categories, media index, and settings.`)) {
+      if (backupInputRef.current) backupInputRef.current.value = '';
+      return;
+    }
+
+    setIsRestoringBackup(true);
+    setBackupMessage({ text: `Restoring data from ${file.name}...`, type: 'info' });
+
+    try {
+      const text = await file.text();
+      const backupData = JSON.parse(text);
+      const res = await authenticatedFetch('/api/backup/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(backupData),
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setBackupMessage({ text: data.message || '✓ Backup restored successfully!', type: 'success' });
+        onLogSecurityEvent('Backup Restore', 'success', `Restored data from ${file.name}`);
+        setTimeout(() => window.location.reload(), 1500);
+      } else {
+        setBackupMessage({ text: data.error || 'Restore failed', type: 'error' });
+      }
+    } catch (err: any) {
+      setBackupMessage({ text: `Restore error: ${err.message}`, type: 'error' });
+    } finally {
+      setIsRestoringBackup(false);
+      if (backupInputRef.current) backupInputRef.current.value = '';
     }
   };
 
@@ -256,6 +327,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             { id: 'cloudflare-d1', label: 'Cloudflare D1 DB', icon: Database },
             { id: 'cloudflare', label: 'Static Export', icon: Cloud },
             { id: 'security', label: 'Security Posture', icon: Shield },
+            { id: 'backup', label: 'Data Backup & Restore', icon: FileDown },
           ].map((item) => {
             const active = activeTab === item.id;
             const Icon = item.icon;
@@ -419,6 +491,106 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <span className="text-stone-400 text-[11px]">{log.ipMasked}</span>
                     </div>
                   ))}
+                </div>
+              </div>
+            </div>
+          )}
+          {activeTab === 'backup' && (
+            <div className="space-y-6">
+              <div className="pb-4 border-b border-stone-200">
+                <h3 className="text-base font-bold font-editorial-serif text-stone-900">
+                  Data Backup, Preservation & Recovery Engine
+                </h3>
+                <p className="text-xs text-stone-500 font-mono">
+                  Export and restore your complete newsroom database to prevent any data loss across code updates or hosting migrations.
+                </p>
+              </div>
+
+              {backupMessage && (
+                <div
+                  className={`p-3 rounded text-xs font-mono flex items-center justify-between border ${
+                    backupMessage.type === 'success'
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                      : backupMessage.type === 'error'
+                      ? 'bg-rose-50 border-rose-300 text-rose-900'
+                      : 'bg-stone-100 border-stone-300 text-stone-800'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    {backupMessage.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />}
+                    {backupMessage.type === 'error' && <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />}
+                    <span>{backupMessage.text}</span>
+                  </div>
+                  <button onClick={() => setBackupMessage(null)} className="text-stone-400 hover:text-stone-700 ml-4 font-bold">
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* 1-Click Backup Export Card */}
+                <div className="p-5 bg-white border border-stone-200 rounded-lg shadow-xs space-y-4 flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase text-stone-900">
+                      <FileDown className="w-4 h-4 text-emerald-600" />
+                      <span>1-Click Full System Backup</span>
+                    </div>
+                    <p className="text-xs text-stone-600 leading-relaxed">
+                      Download a single, complete portable JSON backup file directly to your computer containing:
+                    </p>
+                    <ul className="text-[11px] font-mono text-stone-600 space-y-1 list-disc list-inside bg-stone-50 p-3 rounded border border-stone-150">
+                      <li><strong>{articles.length} Articles</strong> (Full text, English & Hindi, SEO tags, view counts)</li>
+                      <li><strong>{categories.length} Categories</strong> & Taxonomy hierarchy</li>
+                      <li><strong>Media Index & Local Images registry</strong></li>
+                      <li><strong>Custom HTML, CSS & Tracking Scripts</strong></li>
+                      <li><strong>Branding, Logo & Footer configurations</strong></li>
+                      <li><strong>Autonomous Scheduler & Model configurations</strong></li>
+                      <li><strong>Google AdSense slots & ad layout settings</strong></li>
+                    </ul>
+                  </div>
+
+                  <button
+                    onClick={handleExportFullBackup}
+                    disabled={isExportingBackup}
+                    className="w-full py-2.5 px-4 text-xs font-mono font-semibold bg-emerald-700 hover:bg-emerald-800 text-white rounded flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                  >
+                    <FileDown className="w-4 h-4" />
+                    <span>{isExportingBackup ? 'Generating Backup...' : 'Download Full Backup (.json)'}</span>
+                  </button>
+                </div>
+
+                {/* Restore Backup Card */}
+                <div className="p-5 bg-white border border-stone-200 rounded-lg shadow-xs space-y-4 flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase text-stone-900">
+                      <FileUp className="w-4 h-4 text-stone-800" />
+                      <span>Restore from Previous Backup</span>
+                    </div>
+                    <p className="text-xs text-stone-600 leading-relaxed">
+                      Upload any previously downloaded <code className="bg-stone-100 px-1 py-0.5 rounded font-mono">global24x7-full-backup-*.json</code> file to instantly restore your entire website state, articles, and settings.
+                    </p>
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded text-amber-900 text-xs leading-relaxed">
+                      <span className="font-bold">Safe De-duplication:</span> All restored article URLs are automatically collision-checked and indexed without overwriting existing unique IDs.
+                    </div>
+                  </div>
+
+                  <div>
+                    <input
+                      ref={backupInputRef}
+                      type="file"
+                      accept=".json"
+                      onChange={handleRestoreFullBackup}
+                      className="hidden"
+                      id="dashboard-restore-input"
+                    />
+                    <label
+                      htmlFor="dashboard-restore-input"
+                      className="w-full py-2.5 px-4 text-xs font-mono font-semibold bg-stone-900 hover:bg-stone-800 text-white rounded flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs text-center block"
+                    >
+                      <FileUp className="w-4 h-4 inline-block" />
+                      <span>{isRestoringBackup ? 'Restoring System...' : 'Upload & Restore Backup (.json)'}</span>
+                    </label>
+                  </div>
                 </div>
               </div>
             </div>

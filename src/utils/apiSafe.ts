@@ -1,6 +1,8 @@
 /**
- * Safe fetch utility that never throws 'Unexpected end of JSON input' or fails on HTML responses.
- * Essential for static hosts like Cloudflare Pages, GitHub Pages, or serverless edge deploys.
+ * Safe fetch utility and credential manager for Global 24x7.
+ * Guarantees that requests to `/api/*` include administrative
+ * authorization headers, and prevents 401 Unauthorized errors
+ * on media uploads or autonomous cycles.
  */
 
 export interface SafeFetchResult<T = any> {
@@ -33,31 +35,44 @@ export function getAdminPasscode(): string {
   }
 }
 
+/**
+ * Standard fetch with automated admin credentials attachment and token refresh.
+ */
+export async function authenticatedFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit
+): Promise<Response> {
+  const headers = new Headers(init?.headers || {});
+  const token = getAdminAuthToken();
+  if (token) {
+    if (!headers.has('x-admin-token')) headers.set('x-admin-token', token);
+    if (!headers.has('authorization')) headers.set('authorization', `Bearer ${token}`);
+  }
+  const passcode = getAdminPasscode();
+  if (passcode && !headers.has('x-admin-passcode')) {
+    headers.set('x-admin-passcode', passcode);
+  }
+
+  const finalInit: RequestInit = { ...init, headers };
+  const res = await fetch(input, finalInit);
+
+  const refreshedToken = res.headers.get('x-refreshed-admin-token');
+  if (refreshedToken) {
+    try {
+      sessionStorage.setItem('chronicle_admin_session', refreshedToken);
+      localStorage.setItem('chronicle_admin_token', refreshedToken);
+    } catch {}
+  }
+
+  return res;
+}
+
 export async function safeFetchJson<T = any>(
   input: RequestInfo | URL,
   init?: RequestInit
 ): Promise<SafeFetchResult<T>> {
   try {
-    const headers = new Headers(init?.headers || {});
-    const token = getAdminAuthToken();
-    if (token) {
-      if (!headers.has('x-admin-token')) headers.set('x-admin-token', token);
-      if (!headers.has('authorization')) headers.set('authorization', `Bearer ${token}`);
-    }
-    const passcode = getAdminPasscode();
-    if (passcode && !headers.has('x-admin-passcode')) {
-      headers.set('x-admin-passcode', passcode);
-    }
-    const finalInit: RequestInit = { ...init, headers };
-    const res = await fetch(input, finalInit);
-
-    const refreshedToken = res.headers.get('x-refreshed-admin-token');
-    if (refreshedToken) {
-      try {
-        sessionStorage.setItem('chronicle_admin_session', refreshedToken);
-        localStorage.setItem('chronicle_admin_token', refreshedToken);
-      } catch {}
-    }
+    const res = await authenticatedFetch(input, init);
 
     const contentType = res.headers.get('content-type') || '';
     const text = await res.text();

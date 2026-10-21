@@ -15,8 +15,12 @@ import {
   CheckCircle2,
   AlertCircle,
   FileUp,
+  Sparkles,
+  Globe,
 } from 'lucide-react';
 import { MediaAsset, CustomCategory } from '../../types';
+import { safeFetchJson } from '../../utils/apiSafe';
+import { WikimediaSearchResult } from '../../utils/imageService';
 
 interface MediaManagerPanelProps {
   categories: CustomCategory[];
@@ -46,16 +50,22 @@ export const MediaManagerPanel: React.FC<MediaManagerPanelProps> = ({ categories
   const [downloadCategory, setDownloadCategory] = useState(categories[0]?.name || 'Technology');
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // Bulk localization state
+  // Wikimedia Press Media Finder states
+  const [wikiQuery, setWikiQuery] = useState('');
+  const [wikiResults, setWikiResults] = useState<WikimediaSearchResult[]>([]);
+  const [isSearchingWiki, setIsSearchingWiki] = useState(false);
+  const [isImportingWiki, setIsImportingWiki] = useState<string | null>(null);
+
+  // Bulk visual upgrade states
   const [isLocalizingAll, setIsLocalizingAll] = useState(false);
+  const [isUpgradingVisuals, setIsUpgradingVisuals] = useState(false);
 
   const fetchMedia = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/media');
-      const data = await res.json();
-      if (data.success && data.media) {
-        setMediaList(data.media);
+      const res = await safeFetchJson<{ success: boolean; media?: MediaAsset[] }>('/api/media');
+      if (res.ok && res.data?.success && res.data.media) {
+        setMediaList(res.data.media);
       }
     } catch (err) {
       console.warn('Failed to fetch media list:', err);
@@ -85,7 +95,7 @@ export const MediaManagerPanel: React.FC<MediaManagerPanelProps> = ({ categories
       reader.onload = async () => {
         try {
           const base64Data = reader.result as string;
-          const res = await fetch('/api/media/upload', {
+          const res = await safeFetchJson<{ success: boolean; asset?: MediaAsset; error?: string }>('/api/media/upload', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -96,10 +106,9 @@ export const MediaManagerPanel: React.FC<MediaManagerPanelProps> = ({ categories
               seoTitle: uploadTitle.trim() || undefined,
             }),
           });
-          const data = await res.json();
-          if (data.success && data.asset) {
+          if (res.ok && res.data?.success && res.data.asset) {
             setStatusMessage({
-              text: `Success! "${data.asset.filename}" uploaded directly to your server (/media/${data.asset.filename}).`,
+              text: `Success! "${res.data.asset.filename}" uploaded directly to your server (/media/${res.data.asset.filename}).`,
               type: 'success',
             });
             setUploadAltText('');
@@ -107,7 +116,7 @@ export const MediaManagerPanel: React.FC<MediaManagerPanelProps> = ({ categories
             if (fileInputRef.current) fileInputRef.current.value = '';
             fetchMedia();
           } else {
-            setStatusMessage({ text: data.error || 'Upload failed.', type: 'error' });
+            setStatusMessage({ text: res.data?.error || res.error || 'Upload failed.', type: 'error' });
           }
         } catch (uploadErr: any) {
           setStatusMessage({ text: uploadErr.message || 'Error transmitting upload.', type: 'error' });
@@ -133,7 +142,7 @@ export const MediaManagerPanel: React.FC<MediaManagerPanelProps> = ({ categories
     setStatusMessage({ text: 'Downloading image from external URL to server storage...', type: 'info' });
 
     try {
-      const res = await fetch('/api/media/download-url', {
+      const res = await safeFetchJson<{ success: boolean; asset?: MediaAsset; error?: string }>('/api/media/download-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -142,22 +151,84 @@ export const MediaManagerPanel: React.FC<MediaManagerPanelProps> = ({ categories
           topicTitle: downloadTopic.trim() || undefined,
         }),
       });
-      const data = await res.json();
-      if (data.success) {
+      if (res.ok && res.data?.success && res.data.asset) {
         setStatusMessage({
-          text: `Image downloaded, renamed SEO-friendly, and archived at ${data.asset.localPath}`,
+          text: `Image downloaded, renamed SEO-friendly, and archived at ${res.data.asset.localPath}`,
           type: 'success',
         });
         setDownloadUrl('');
         setDownloadTopic('');
         fetchMedia();
       } else {
-        setStatusMessage({ text: data.error || 'Failed to download image.', type: 'error' });
+        setStatusMessage({ text: res.data?.error || res.error || 'Failed to download image.', type: 'error' });
       }
     } catch (err: any) {
       setStatusMessage({ text: err.message || 'Download failed.', type: 'error' });
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  // Live Wikimedia Commons search
+  const handleSearchWikimedia = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!wikiQuery.trim()) return;
+    setIsSearchingWiki(true);
+    setStatusMessage({ text: `Searching Wikimedia Commons for "${wikiQuery}"...`, type: 'info' });
+    try {
+      const res = await safeFetchJson<{ success: boolean; results?: WikimediaSearchResult[] }>(
+        `/api/media/search-wikimedia?q=${encodeURIComponent(wikiQuery.trim())}&limit=12`
+      );
+      if (res.ok && res.data?.results) {
+        setWikiResults(res.data.results);
+        setStatusMessage({
+          text: `Found ${res.data.results.length} copyright-free press photos on Wikimedia for "${wikiQuery}".`,
+          type: 'success',
+        });
+      } else {
+        setStatusMessage({ text: 'No results found on Wikimedia for this query.', type: 'error' });
+      }
+    } catch (err: any) {
+      setStatusMessage({ text: err.message || 'Search failed', type: 'error' });
+    } finally {
+      setIsSearchingWiki(false);
+    }
+  };
+
+  // Import Wikimedia photo directly to local /media/
+  const handleImportWikimediaItem = async (item: WikimediaSearchResult) => {
+    setIsImportingWiki(item.url);
+    setStatusMessage({ text: `Downloading & archiving "${item.title}" to local /media/...`, type: 'info' });
+    try {
+      const res = await safeFetchJson<{ success: boolean; imageUrl?: string; message?: string; error?: string }>(
+        '/api/media/search-and-import-web',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            directUrl: item.url,
+            category: uploadCategory,
+            articleTitle: item.description || item.title,
+            articleSlug: item.title.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 30),
+            photographer: item.photographer,
+            license: item.license,
+            pageUrl: item.pageUrl,
+          }),
+        }
+      );
+      if (res.ok && res.data?.success) {
+        setStatusMessage({
+          text: `✓ Image saved to your server at ${res.data.imageUrl} with attribution: ${item.photographer} (${item.license})`,
+          type: 'success',
+        });
+        fetchMedia();
+      } else {
+        setStatusMessage({ text: res.data?.error || res.error || 'Import failed', type: 'error' });
+      }
+    } catch (err: any) {
+      setStatusMessage({ text: err.message || 'Import error', type: 'error' });
+    } finally {
+      setIsImportingWiki(null);
     }
   };
 
@@ -167,16 +238,18 @@ export const MediaManagerPanel: React.FC<MediaManagerPanelProps> = ({ categories
     setStatusMessage({ text: 'Downloading external images and converting to local server files...', type: 'info' });
 
     try {
-      const res = await fetch('/api/media/localize-article-images', { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
+      const res = await safeFetchJson<{ success: boolean; message?: string; localizedCount?: number; error?: string }>(
+        '/api/media/localize-article-images',
+        { method: 'POST' }
+      );
+      if (res.ok && res.data?.success) {
         setStatusMessage({
-          text: data.message || `Successfully localized ${data.localizedCount} images to our server!`,
+          text: res.data.message || `Successfully localized ${res.data.localizedCount} images to our server!`,
           type: 'success',
         });
         fetchMedia();
       } else {
-        setStatusMessage({ text: data.error || 'Localization failed.', type: 'error' });
+        setStatusMessage({ text: res.data?.error || res.error || 'Localization failed.', type: 'error' });
       }
     } catch (err: any) {
       setStatusMessage({ text: err.message || 'Localization process failed.', type: 'error' });
@@ -188,7 +261,7 @@ export const MediaManagerPanel: React.FC<MediaManagerPanelProps> = ({ categories
   const handleSaveMetadata = async () => {
     if (!editingAsset) return;
     try {
-      const res = await fetch('/api/media/update', {
+      const res = await safeFetchJson<{ success: boolean; error?: string }>('/api/media/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -198,11 +271,12 @@ export const MediaManagerPanel: React.FC<MediaManagerPanelProps> = ({ categories
           category: editingAsset.category,
         }),
       });
-      const data = await res.json();
-      if (data.success) {
+      if (res.ok && res.data?.success) {
         setStatusMessage({ text: 'SEO metadata updated successfully!', type: 'success' });
         setEditingAsset(null);
         fetchMedia();
+      } else {
+        setStatusMessage({ text: res.data?.error || 'Failed to update metadata.', type: 'error' });
       }
     } catch {
       setStatusMessage({ text: 'Failed to update metadata.', type: 'error' });
@@ -212,9 +286,8 @@ export const MediaManagerPanel: React.FC<MediaManagerPanelProps> = ({ categories
   const handleDelete = async (id: string) => {
     if (!confirm('Permanently delete this media asset from server disk storage?')) return;
     try {
-      const res = await fetch(`/api/media/${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) {
+      const res = await safeFetchJson<{ success: boolean }>(`/api/media/${id}`, { method: 'DELETE' });
+      if (res.ok && res.data?.success) {
         setMediaList((prev) => prev.filter((m) => m.id !== id));
         setStatusMessage({ text: 'Asset removed from server storage.', type: 'info' });
       }
@@ -471,6 +544,81 @@ export const MediaManagerPanel: React.FC<MediaManagerPanelProps> = ({ categories
             </form>
           </div>
         </div>
+      </div>
+
+      {/* Live Wikimedia Commons Copyright-Free Press Finder */}
+      <div className="p-4 bg-gradient-to-r from-stone-50 via-white to-stone-50 border border-stone-200 rounded-lg shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            <Globe className="w-4 h-4 text-emerald-600" />
+            <h4 className="text-xs font-bold font-mono uppercase text-stone-900">
+              Find & Import Internet Press Photos (Wikimedia Commons)
+            </h4>
+          </div>
+          <span className="text-[11px] font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+            100% Copyright-Free &bull; CC-BY / Public Domain &bull; Auto-Localizer
+          </span>
+        </div>
+        <form onSubmit={handleSearchWikimedia} className="flex gap-2 mb-3">
+          <input
+            type="text"
+            placeholder="Search real press events, politicians, science missions (e.g. Chandrayaan, G20, NVIDIA chip)..."
+            value={wikiQuery}
+            onChange={(e) => setWikiQuery(e.target.value)}
+            className="flex-1 px-3 py-1.5 text-xs font-mono border border-stone-300 rounded focus:border-stone-900 outline-none bg-white"
+          />
+          <button
+            type="submit"
+            disabled={isSearchingWiki || !wikiQuery.trim()}
+            className="px-4 py-1.5 text-xs font-mono font-semibold bg-stone-900 hover:bg-stone-800 text-white rounded flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+          >
+            <Search className={`w-3.5 h-3.5 ${isSearchingWiki ? 'animate-spin' : ''}`} />
+            <span>{isSearchingWiki ? 'Searching Wire...' : 'Search Press Photos'}</span>
+          </button>
+        </form>
+
+        {wikiResults.length > 0 && (
+          <div className="mt-3">
+            <div className="text-[11px] font-mono text-stone-500 mb-2">
+              Found {wikiResults.length} press photos on Wikimedia. Click any photo to import and save directly to your server:
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-72 overflow-y-auto p-1">
+              {wikiResults.map((item, idx) => (
+                <div
+                  key={idx}
+                  className="group relative border border-stone-200 hover:border-emerald-600 rounded bg-white p-1.5 transition-all flex flex-col justify-between"
+                >
+                  <div className="aspect-video w-full bg-stone-100 rounded overflow-hidden mb-1.5 relative">
+                    <img
+                      src={item.thumbUrl}
+                      alt={item.description}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      loading="lazy"
+                    />
+                    <div className="absolute top-1 right-1 px-1 py-0.5 text-[9px] font-mono bg-black/75 text-white rounded">
+                      {item.license.slice(0, 15)}
+                    </div>
+                  </div>
+                  <div className="text-[11px] font-medium text-stone-800 line-clamp-1 mb-0.5" title={item.description}>
+                    {item.description || item.title}
+                  </div>
+                  <div className="text-[10px] text-stone-500 line-clamp-1 mb-2 font-mono" title={item.photographer}>
+                    By {item.photographer}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleImportWikimediaItem(item)}
+                    disabled={isImportingWiki === item.url}
+                    className="w-full py-1 text-[11px] font-mono font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    <Download className={`w-3 h-3 ${isImportingWiki === item.url ? 'animate-bounce' : ''}`} />
+                    <span>{isImportingWiki === item.url ? 'Importing...' : 'Save to /media/'}</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Filter and Search Bar */}
