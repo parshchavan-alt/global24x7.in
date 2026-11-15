@@ -339,65 +339,125 @@ function rotateToNextKey(reason: string) {
   );
 }
 
+function normalizeGeminiModel(model?: string): string {
+  const m = (model || '').trim();
+  if (m === 'gemini-4-hydrogen' || m === 'gemini-4-argon' || m === 'gemini-4-carbon' || m === 'gemini-3.1-flash-lite') {
+    return m;
+  }
+  return 'gemini-4-hydrogen';
+}
+
+function parseJsonSafe(rawText?: string | null): any | null {
+  if (!rawText) return null;
+  const cleaned = rawText
+    .replace(/```json/gi, '')
+    .replace(/```/g, '')
+    .trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      try {
+        return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+function countWords(text?: string): number {
+  if (!text) return 0;
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function isStubOrShortArticle(art: Pick<Article, 'title' | 'content'>): boolean {
+  const words = countWords(art.content);
+  if (words < 350) return true;
+  if (
+    art.content.includes('Structural Paradigms and Institutional Mechanics\nIndustry analysts and regulatory bodies') ||
+    art.content.includes('Structural Paradigms and Transitions\nIndependent observers highlight')
+  ) {
+    return true;
+  }
+  return false;
+}
+
 async function callGeminiWithFailover(
   model: string,
   userPrompt: string,
   systemPrompt: string,
   responseMimeType: string = 'application/json'
 ): Promise<{ text: string | null; modelUsed: string; accountUsed: string; error?: string }> {
+  const primaryModel = normalizeGeminiModel(model);
   if (keyPool.length === 0) {
     return {
       text: null,
-      modelUsed: model,
+      modelUsed: primaryModel,
       accountUsed: 'No Key Configured',
-      error: 'No Gemini API keys found. Please add a key in the Admin AI Studio.',
+      error: 'No Gemini API keys configured. Add a Gemini API key in Admin AI Tuning Studio or environment settings.',
     };
   }
 
-  let attempts = 0;
-  const maxAttempts = keyPool.length;
+  const candidateModels = Array.from(new Set([primaryModel, 'gemini-4-hydrogen', 'gemini-3.1-flash-lite']));
   let lastErrorMessage = '';
 
-  while (attempts < maxAttempts) {
-    const current = getActiveAiClient();
-    if (!current) break;
+  for (const activeModel of candidateModels) {
+    let attempts = 0;
+    const maxAttempts = keyPool.length;
 
-    try {
-      const response = await current.ai.models.generateContent({
-        model,
-        contents: userPrompt,
-        config: {
-          systemInstruction: systemPrompt,
-          responseMimeType,
-          temperature: 0.7,
-        },
-      });
-      current.item.requestsHandled += 1;
-      current.item.lastUsedTimestamp = new Date().toISOString();
-      current.item.status = 'active';
-      return {
-        text: response.text || null,
-        modelUsed: model,
-        accountUsed: current.item.label,
-      };
-    } catch (err: any) {
-      attempts += 1;
-      const errMsg = err?.message || String(err);
-      lastErrorMessage = errMsg;
-      console.warn(
-        `Gemini call failed with account key ${current.item.label} (attempt ${attempts}/${maxAttempts}): ${errMsg}`
-      );
+    while (attempts < maxAttempts) {
+      const current = getActiveAiClient();
+      if (!current) break;
 
-      if (
-        errMsg.includes('429') ||
-        errMsg.includes('RESOURCE_EXHAUSTED') ||
-        errMsg.includes('quota') ||
-        errMsg.includes('limit') ||
-        errMsg.includes('API_KEY_INVALID')
-      ) {
-        rotateToNextKey(errMsg);
-      } else {
-        if (keyPool.length > 1) {
+      try {
+        const response = await current.ai.models.generateContent({
+          model: activeModel,
+          contents: userPrompt,
+          config: {
+            systemInstruction: systemPrompt,
+            responseMimeType,
+          },
+        });
+        current.item.requestsHandled += 1;
+        current.item.lastUsedTimestamp = new Date().toISOString();
+        current.item.status = 'active';
+        return {
+          text: response.text || null,
+          modelUsed: activeModel,
+          accountUsed: current.item.label,
+        };
+      } catch (err: any) {
+        attempts += 1;
+        const errMsg = err?.message || String(err);
+        lastErrorMessage = errMsg;
+        console.warn(
+          `Gemini call (${activeModel}) failed with account key ${current.item.label} (attempt ${attempts}/${maxAttempts}): ${errMsg}`
+        );
+
+        const isModelMissing =
+          errMsg.includes('404') ||
+          errMsg.includes('NOT_FOUND') ||
+          errMsg.toLowerCase().includes('not found') ||
+          errMsg.toLowerCase().includes('unsupported');
+
+        if (isModelMissing) {
+          // Try next valid candidate model immediately without blaming the API key
+          break;
+        }
+
+        if (
+          errMsg.includes('429') ||
+          errMsg.includes('RESOURCE_EXHAUSTED') ||
+          errMsg.includes('quota') ||
+          errMsg.includes('limit') ||
+          errMsg.includes('API_KEY_INVALID')
+        ) {
+          rotateToNextKey(errMsg);
+        } else if (keyPool.length > 1) {
           rotateToNextKey(`Operational error: ${errMsg.slice(0, 40)}`);
         } else {
           break;
@@ -408,7 +468,7 @@ async function callGeminiWithFailover(
 
   return {
     text: null,
-    modelUsed: model,
+    modelUsed: primaryModel,
     accountUsed: keyPool[activeKeyIndex]?.label || 'Unknown',
     error: lastErrorMessage || 'All API key quotas exhausted.',
   };
@@ -548,12 +608,12 @@ function saveAdSenseConfig() {
 // AI FINE-TUNING CONFIG PERSISTENCE
 // -------------------------------------------------------------
 let fineTuningConfig: AIFineTuningConfig = {
-  selectedModel: 'gemini-3.8-flash',
+  selectedModel: 'gemini-4-hydrogen',
   writingPersona: 'investigative',
   toneFormality: 4,
   depthLevel: 4,
   neutralityLevel: 5,
-  targetWordCount: 800,
+  targetWordCount: 950,
   includeTakeaways: true,
   includeHistoricalContext: true,
   includeExpertQuotes: true,
@@ -563,7 +623,12 @@ let fineTuningConfig: AIFineTuningConfig = {
 
 try {
   if (fs.existsSync(FINE_TUNING_FILE)) {
-    fineTuningConfig = { ...fineTuningConfig, ...JSON.parse(fs.readFileSync(FINE_TUNING_FILE, 'utf-8')) };
+    const loaded = JSON.parse(fs.readFileSync(FINE_TUNING_FILE, 'utf-8'));
+    fineTuningConfig = {
+      ...fineTuningConfig,
+      ...loaded,
+      selectedModel: normalizeGeminiModel(loaded?.selectedModel) as any,
+    };
   } else {
     fs.writeFileSync(FINE_TUNING_FILE, JSON.stringify(fineTuningConfig, null, 2));
   }
@@ -844,10 +909,137 @@ function computeNextRunTimestamp(frequencyMins: number, useJitter: boolean): str
   return new Date(Date.now() + totalDelayMs).toISOString();
 }
 
+interface ArticleSynthesisOptions {
+  category: string;
+  topic?: string;
+  isEvergreen?: boolean;
+  targetWordCount?: number;
+  writingPersona?: string;
+  toneFormality?: number;
+  depthLevel?: number;
+  customDirectives?: string;
+  targetLanguage?: 'en' | 'hi';
+  selectedModel?: string;
+  recentTitles?: string[];
+}
+
+async function synthesizeFullArticleWithAI(opts: ArticleSynthesisOptions): Promise<{
+  success: boolean;
+  data?: any;
+  modelUsed: string;
+  accountUsed: string;
+  wordCount: number;
+  error?: string;
+}> {
+  const cat = opts.category || 'Technology';
+  const targetWords = Math.max(800, Math.min(1600, opts.targetWordCount || fineTuningConfig.targetWordCount || 950));
+  const model = normalizeGeminiModel(opts.selectedModel || fineTuningConfig.selectedModel);
+  const persona = opts.writingPersona || fineTuningConfig.writingPersona || 'investigative';
+  const formality = opts.toneFormality ?? fineTuningConfig.toneFormality ?? 4;
+  const depth = opts.depthLevel ?? fineTuningConfig.depthLevel ?? 4;
+  const customDirectives = opts.customDirectives ?? fineTuningConfig.customSystemDirectives ?? '';
+  const recentAvoidList = (opts.recentTitles || articles.slice(0, 15).map((a) => a.title)).filter(Boolean);
+
+  const systemPrompt = `You are a world-class investigative editor and senior correspondent for "Global 24x7", an elite 24-hour continuous international broadsheet newsroom.
+Your mission is to produce a profound, comprehensive, publication-ready broadsheet article in category: "${cat}".
+
+Content Style & Architecture:
+- Type: ${opts.isEvergreen ? 'EVERGREEN PILLAR DISPATCH (Definitive Guide, Foundational Deep-Dive, Explainer or Timeless Framework)' : 'TIMELY BREAKING DISPATCH (Immediate Emerging Horizon, Regulatory/Economic/Tech Shift, Strategic Impact)'}
+- Persona: ${persona} | Formality: ${formality}/5 | Analytical Depth: ${depth}/5
+- Tone: Authoritative, rigorously researched, objective, nuanced, zero fluff or generic filler.
+- STRICT LENGTH REQUIREMENT: You MUST write ${targetWords} to ${targetWords + 250} words in the "content" field across 5 to 7 substantive sections separated by Markdown ## subheadings (## Subtitle). Short 3-4 sentence articles or brief summaries are strictly unacceptable. Include concrete institutional dynamics, historical or technical context, stakeholder trade-offs, and global implications.
+${customDirectives ? `- Editorial Directives: ${customDirectives}` : ''}
+${opts.targetLanguage === 'hi' ? '- Language: Write completely in fluent, authoritative journalistic Hindi (हिन्दी) in proper Devanagari script.' : ''}
+${recentAvoidList.length ? `- Do NOT duplicate or closely paraphrase these recent headlines:\n  - ${recentAvoidList.slice(0, 10).join('\n  - ')}` : ''}
+
+Strict JSON Output Schema (respond with valid JSON only):
+{
+  "title": "Compelling Headline in Title Case",
+  "summary": "1-2 sentence executive summary",
+  "content": "Full long-form broadsheet markdown article (${targetWords}-${targetWords + 250} words, minimum 650 words) with 5-7 ## subheadings and multi-paragraph deep analysis per section",
+  "keyTakeaways": ["Takeaway 1", "Takeaway 2", "Takeaway 3", "Takeaway 4"],
+  "tags": ["Tag1", "Tag2", "Tag3", "Tag4"],
+  "visualScenePrompt": "1-2 sentence concrete physical description of what a photojournalist would capture on camera (real people/professions, equipment, location, lighting; avoid abstract buzzwords)",
+  "visualSearchKeywords": ["SpecificEntityOrLocation1", "SpecificSubject2"],
+  "readingTimeMinutes": ${Math.max(4, Math.ceil(targetWords / 200))},
+  "seo": {
+    "metaTitle": "SEO title under 65 chars",
+    "metaDescription": "SEO meta description under 155 chars",
+    "focusKeywords": ["keyword1", "keyword2", "keyword3"]
+  }
+}`;
+
+  const userPrompt = opts.topic?.trim()
+    ? `Write a complete ${targetWords}-word investigative broadsheet dispatch on: "${opts.topic.trim()}" in category "${cat}". Ensure deep multi-section analysis with at least 5 ## subheadings and rich concrete detail.`
+    : opts.isEvergreen
+    ? `Write a comprehensive ${targetWords}-word timeless definitive guide or pillar analysis on an original, high-impact subject within "${cat}". Ensure at least 5 ## subheadings and deep institutional/technical detail.`
+    : `Report a comprehensive ${targetWords}-word front-page dispatch examining a major unfolding development and systemic shift within "${cat}". Ensure at least 5 ## subheadings and rich analytical reporting.`;
+
+  const aiResult = await callGeminiWithFailover(model, userPrompt, systemPrompt, 'application/json');
+  if (!aiResult.text) {
+    return {
+      success: false,
+      modelUsed: aiResult.modelUsed,
+      accountUsed: aiResult.accountUsed,
+      wordCount: 0,
+      error: aiResult.error || 'Gemini API did not return any content.',
+    };
+  }
+
+  let generatedData = parseJsonSafe(aiResult.text);
+  if (!generatedData || !generatedData.title || !generatedData.content) {
+    return {
+      success: false,
+      modelUsed: aiResult.modelUsed,
+      accountUsed: aiResult.accountUsed,
+      wordCount: 0,
+      error: 'Gemini returned malformed JSON missing title or content.',
+    };
+  }
+
+  let wc = countWords(generatedData.content);
+
+  // Automatic single expansion pass if the first draft was unexpectedly brief
+  if (wc < 450) {
+    console.warn(`[Synthesis Quality Gate] Draft "${generatedData.title}" had only ${wc} words. Running automatic expansion pass...`);
+    const expandPrompt = `The following broadsheet draft is too short (${wc} words). Expand and rewrite "content" into a rich, authoritative ${targetWords}-word investigative report with 5-7 detailed ## subheadings, concrete empirical mechanisms, historical perspective, and global stakeholder analysis. Keep the same JSON schema.
+
+Draft Title: ${generatedData.title}
+Draft Summary: ${generatedData.summary}
+Current Short Content:
+${generatedData.content}`;
+
+    const expandResult = await callGeminiWithFailover(aiResult.modelUsed, expandPrompt, systemPrompt, 'application/json');
+    const expandedJson = parseJsonSafe(expandResult.text);
+    if (expandedJson?.content && countWords(expandedJson.content) > wc) {
+      generatedData = { ...generatedData, ...expandedJson };
+      wc = countWords(generatedData.content);
+    }
+  }
+
+  if (wc < 350) {
+    return {
+      success: false,
+      modelUsed: aiResult.modelUsed,
+      accountUsed: aiResult.accountUsed,
+      wordCount: wc,
+      error: `Quality gate rejected short article (${wc} words; minimum 350 required). No stub published.`,
+    };
+  }
+
+  return {
+    success: true,
+    data: generatedData,
+    modelUsed: aiResult.modelUsed,
+    accountUsed: aiResult.accountUsed,
+    wordCount: wc,
+  };
+}
+
 async function executeAutonomousArticleGeneration(
   categoryOverride?: string,
   forceTopicStrategy?: 'breaking_trending' | 'evergreen_pillars'
-): Promise<{ success: boolean; article?: Article; hindiArticle?: Article; error?: string }> {
+): Promise<{ success: boolean; article?: Article; hindiArticle?: Article; modelUsed?: string; error?: string }> {
   const cat =
     categoryOverride ||
     schedulerConfig.categoriesInRotation[
@@ -867,80 +1059,23 @@ async function executeAutonomousArticleGeneration(
     isEvergreen = schedulerConfig.articlesGeneratedCount % 2 === 1;
   }
 
-  const model = 'gemini-3.8-flash';
-  const systemPrompt = `You are a world-class investigative editor and correspondent for "Global 24x7", an elite 24-hour continuous international newsroom.
-Your mission is to produce a profound, highly engaging, publication-ready broadsheet article in category: "${cat}".
+  const synth = await synthesizeFullArticleWithAI({
+    category: cat,
+    isEvergreen,
+    selectedModel: fineTuningConfig.selectedModel,
+    targetWordCount: fineTuningConfig.targetWordCount,
+  });
 
-Content Style & Architecture:
-- Type: ${isEvergreen ? 'EVERGREEN TRAFFIC MAGNET (Definitive Guide, Foundational Deep-Dive, Explainer or Timeless Framework that ranks organically for years)' : 'TIMELY BREAKING DISPATCH (Immediate Emerging Horizon, Regulatory/Economic/Tech Shift, Strategic Impact)'}
-- Tone: Authoritative, rigorously researched, objective, nuanced, zero fluff or AI clichés.
-- Word Target: approx 750-1000 words.
-- Format:
-  1. Compelling Headline in Title Case
-  2. 1-2 sentence executive summary
-  3. 3-4 bullet Key Takeaways
-  4. 5-7 detailed paragraphs structured with Markdown subheadings (## Subtitle)
-  5. 3-5 high-traffic SEO tags
-  6. Concrete real-world visual scene description (1-2 sentences) of what a photojournalist would frame (concrete physical objects, real people/professions, location, lighting; avoid abstract jargon)
-  7. 2-3 specific real-world search keywords for international press wire photos (e.g. named entities, institutions, physical tech)
-  8. Meta description under 155 characters
-
-Strict JSON Output Schema:
-{
-  "title": "Headline string",
-  "summary": "1-2 sentence executive summary",
-  "content": "Full article markdown with ## subheadings and rich analysis",
-  "keyTakeaways": ["Takeaway 1", "Takeaway 2", "Takeaway 3"],
-  "tags": ["Tag1", "Tag2", "Tag3"],
-  "visualScenePrompt": "1-2 sentence concrete physical description of photojournalist scene",
-  "visualSearchKeywords": ["Entity1", "Entity2"],
-  "readingTimeMinutes": 5,
-  "seo": {
-    "metaTitle": "SEO title under 65 chars",
-    "metaDescription": "SEO meta description under 155 chars",
-    "focusKeywords": ["keyword1", "keyword2"]
-  }
-}`;
-
-  const userPrompt = isEvergreen
-    ? `Write a comprehensive, timeless definitive guide or pillar analysis in the category "${cat}" designed for long-term organic search traffic and reader reference.`
-    : `Report on an urgent, high-stakes development and systemic transformation currently unfolding in "${cat}" suitable for today's Global 24x7 lead wire.`;
-
-  const aiResult = await callGeminiWithFailover(model, userPrompt, systemPrompt, 'application/json');
-  let generatedData: any = null;
-
-  if (aiResult.text) {
-    try {
-      generatedData = JSON.parse(aiResult.text);
-    } catch (parseErr) {
-      console.error('Failed to parse Gemini JSON output:', parseErr);
-    }
-  }
-
-  if (!generatedData) {
-    generatedData = {
-      title: isEvergreen
-        ? `The Definitive Guide to Modern ${cat}: Systems, Dynamics & Strategic Frameworks`
-        : `Global 24x7 Wire: Systemic Developments & Strategic Inflection Points in ${cat}`,
-      summary: `A rigorous broadsheet dispatch detailing structural evolutions and institutional momentum across the global ${cat} landscape.`,
-      content: `The global trajectory of **${cat}** has entered a transformative phase as institutional standards and technological architectures realign.\n\n## Structural Paradigms and Institutional Mechanics\nIndustry analysts and regulatory bodies have noted an accelerated shift toward distributed resilience. Rather than relying on legacy monolithic assumptions, leading organizations are deploying agile, verifiable protocols.\n\n## Strategic Implications for Global Markets\nAs capital continues to flow into sustainable infrastructure, market participants face heightened verification standards. Observers forecast significant structural milestones within the upcoming financial quarters.\n\n## Looking Forward: Long-Term Horizon\nStrategic resilience will depend on cross-border synchronization and continuous verification. Global 24x7 will continue monitoring real-time dispatches from our international desks.`,
-      keyTakeaways: [
-        `Pivotal operational realignment documented across the ${cat} sector.`,
-        'Decentralized resilience and transparency prioritized over legacy mechanisms.',
-        'Anticipated regulatory harmonization across major economic corridors.',
-      ],
-      tags: [cat, 'Global 24x7', isEvergreen ? 'Definitive Guide' : 'Breaking Wire', 'Analysis'],
-      visualScenePrompt: `Photojournalists and correspondents documenting active press briefing and industrial operations in ${cat}`,
-      visualSearchKeywords: [cat, 'headquarters'],
-      readingTimeMinutes: 5,
-      seo: {
-        metaTitle: `${cat} Intelligence & Analysis | Global 24x7`,
-        metaDescription: `In-depth reporting and expert analysis on the latest developments in ${cat} from Global 24x7.`,
-        focusKeywords: [cat.toLowerCase(), 'global 24x7 news', 'market analysis'],
-      },
+  if (!synth.success || !synth.data) {
+    console.warn(`[Autonomous Generation] Aborted without publishing stub: ${synth.error}`);
+    return {
+      success: false,
+      modelUsed: synth.modelUsed,
+      error: synth.error || 'AI synthesis failed minimum quality check.',
     };
   }
 
+  const generatedData = synth.data;
   const slug = generateUniqueSlug(generatedData.title || 'dispatch', articles);
   const id = `art-${Date.now()}`;
 
@@ -987,6 +1122,8 @@ Strict JSON Output Schema:
     if (localUrl) finalImageUrl = localUrl;
   } catch {}
 
+  const readingTimeMinutes = Math.max(3, Math.ceil(synth.wordCount / 200));
+
   const englishArticle: Article = {
     id,
     slug,
@@ -1001,7 +1138,7 @@ Strict JSON Output Schema:
       title: `${cat} Senior Correspondent`,
     },
     publishedAt: new Date().toISOString(),
-    readingTimeMinutes: generatedData.readingTimeMinutes || 4,
+    readingTimeMinutes,
     status: schedulerConfig.autoPublish ? 'published' : 'draft',
     featuredRank: 2,
     imageUrl: finalImageUrl,
@@ -1025,7 +1162,7 @@ Strict JSON Output Schema:
   let hindiArticle: Article | undefined = undefined;
   if (schedulerConfig.languageMode === 'both') {
     try {
-      const hindiPrompt = `Translate this news article into fluent, professional journalistic Hindi (हिन्दी) in proper Devanagari script. Maintain high editorial dignity, formal vocabulary, and accurate journalistic tone.
+      const hindiPrompt = `Translate this complete news article into fluent, professional journalistic Hindi (हिन्दी) in proper Devanagari script. Maintain all ## subheadings, high editorial dignity, formal vocabulary, and full length without summarizing or shortening any paragraphs.
 
 Title: ${englishArticle.title}
 Summary: ${englishArticle.summary}
@@ -1037,31 +1174,25 @@ Respond strictly in JSON:
   "title": "Hindi headline in Devanagari",
   "summary": "Hindi summary in Devanagari",
   "keyTakeaways": ["Hindi takeaway 1", "Hindi takeaway 2", "Hindi takeaway 3"],
-  "content": "Full Hindi article in Devanagari with ## subheadings"
+  "content": "Full Hindi article in Devanagari with all ## subheadings"
 }`;
 
       const hiAiResult = await callGeminiWithFailover(
-        'gemini-3.8-flash',
+        'gemini-4-hydrogen',
         hindiPrompt,
         'You are an award-winning senior Hindi news correspondent for Global 24x7.',
         'application/json'
       );
 
-      let hiData: any = null;
-      if (hiAiResult.text) {
-        try {
-          hiData = JSON.parse(hiAiResult.text);
-        } catch {}
-      }
-
-      if (hiData) {
+      const hiData = parseJsonSafe(hiAiResult.text);
+      if (hiData && hiData.content && countWords(hiData.content) >= 250) {
         hindiArticle = {
           ...englishArticle,
           id: `art-hi-${Date.now()}`,
           slug: generateUniqueSlug(`${englishArticle.slug}-hi`, articles),
           title: hiData.title || `[हिन्दी] ${englishArticle.title}`,
           summary: hiData.summary || englishArticle.summary,
-          content: hiData.content || englishArticle.content,
+          content: hiData.content,
           keyTakeaways: hiData.keyTakeaways || englishArticle.keyTakeaways,
           language: 'hi',
           seo: {
@@ -1072,6 +1203,7 @@ Respond strictly in JSON:
         };
         articles.unshift(hindiArticle);
         saveArticles();
+        queueD1ArticleSync(hindiArticle);
       }
     } catch (hiErr) {
       console.warn('Hindi dual-generation warning:', hiErr);
@@ -1082,6 +1214,7 @@ Respond strictly in JSON:
     success: true,
     article: englishArticle,
     hindiArticle,
+    modelUsed: synth.modelUsed,
   };
 }
 
@@ -1104,13 +1237,14 @@ async function checkSchedulerTick() {
     isSchedulerRunningCycle = true;
     try {
       const result = await executeAutonomousArticleGeneration();
+      schedulerConfig.nextRunTimestamp = computeNextRunTimestamp(
+        schedulerConfig.frequencyMinutes,
+        schedulerConfig.naturalJitter
+      );
+
       if (result.success && result.article) {
         schedulerConfig.articlesGeneratedCount += 1;
         schedulerConfig.lastRunTimestamp = new Date().toISOString();
-        schedulerConfig.nextRunTimestamp = computeNextRunTimestamp(
-          schedulerConfig.frequencyMinutes,
-          schedulerConfig.naturalJitter
-        );
         saveScheduler();
         appendSchedulerLog({
           id: `log-${Date.now()}`,
@@ -1120,15 +1254,43 @@ async function checkSchedulerTick() {
           status: schedulerConfig.autoPublish ? 'Published Directly to Portal' : 'Saved to Editorial Review Queue',
           topicType: result.article.isEvergreen ? 'evergreen' : 'breaking',
           language: 'en',
-          modelUsed: 'gemini-3.8-flash',
+          modelUsed: result.modelUsed || 'gemini-4-hydrogen',
           articleId: result.article.id,
         });
         console.log(
-          `[Global 24x7 Auto-Scheduler] Success! Published: "${result.article.title}". Next run: ${schedulerConfig.nextRunTimestamp}`
+          `[Global 24x7 Auto-Scheduler] Success! Published: "${result.article.title}" (${countWords(result.article.content)} words). Next run: ${schedulerConfig.nextRunTimestamp}`
         );
+      } else {
+        saveScheduler();
+        appendSchedulerLog({
+          id: `log-${Date.now()}`,
+          timestamp: new Date().toLocaleTimeString(),
+          category: 'System',
+          title: `Skipped Cycle: ${(result.error || 'AI synthesis unavailable').slice(0, 95)}`,
+          status: 'Failed (Skipped — No Stub Published)',
+          topicType: 'breaking',
+          language: 'en',
+          modelUsed: result.modelUsed || 'gemini-4-hydrogen',
+        });
+        console.warn(`[Global 24x7 Auto-Scheduler] Cycle skipped cleanly: ${result.error}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('[Global 24x7 Auto-Scheduler] Cycle failed:', err);
+      schedulerConfig.nextRunTimestamp = computeNextRunTimestamp(
+        schedulerConfig.frequencyMinutes,
+        schedulerConfig.naturalJitter
+      );
+      saveScheduler();
+      appendSchedulerLog({
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        category: 'System',
+        title: `Cycle Error: ${(err?.message || 'Unexpected failure').slice(0, 95)}`,
+        status: 'Failed (Skipped)',
+        topicType: 'breaking',
+        language: 'en',
+        modelUsed: 'gemini-4-hydrogen',
+      });
     } finally {
       isSchedulerRunningCycle = false;
     }
@@ -1212,7 +1374,7 @@ app.post('/api/scheduler/run-now', requireAdminAuth, async (req, res) => {
         status: schedulerConfig.autoPublish ? 'Published Directly (Manual Trigger)' : 'Saved to Review Queue',
         topicType: result.article.isEvergreen ? 'evergreen' : 'breaking',
         language: 'en',
-        modelUsed: 'gemini-3.8-flash',
+        modelUsed: result.modelUsed || 'gemini-4-hydrogen',
         articleId: result.article.id,
       });
 
@@ -1223,7 +1385,17 @@ app.post('/api/scheduler/run-now', requireAdminAuth, async (req, res) => {
         config: schedulerConfig,
       });
     } else {
-      res.status(500).json({ success: false, error: result.error || 'Generation failed' });
+      appendSchedulerLog({
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        category: category || 'General',
+        title: `Manual Cycle Failed: ${(result.error || 'AI generation rejected').slice(0, 95)}`,
+        status: 'Failed (Skipped — No Stub Published)',
+        topicType: 'breaking',
+        language: 'en',
+        modelUsed: result.modelUsed || 'gemini-4-hydrogen',
+      });
+      res.status(422).json({ success: false, error: result.error || 'Generation failed minimum length check.' });
     }
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || 'Cycle failed' });
@@ -1314,24 +1486,40 @@ app.post('/api/keys/test', requireAdminAuth, async (req, res) => {
   }
 
   const startTime = Date.now();
-  try {
-    const testAi = new GoogleGenAI({
-      apiKey: keyToTest,
-      httpOptions: { headers: { 'User-Agent': 'aistudio-build-test' } },
-    });
-    const response = await testAi.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: 'Respond with valid JSON: {"status": "ok", "message": "verified"}',
-      config: { responseMimeType: 'application/json' },
-    });
-    const latencyMs = Date.now() - startTime;
-    return res.json({
-      success: true,
-      latencyMs,
-      response: response.text,
-      message: `Verified! Gemini 3.8 Flash responded in ${latencyMs}ms.`,
-    });
-  } catch (err: any) {
+  const testModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
+  let lastErr: any = null;
+
+  for (const testModel of testModels) {
+    try {
+      const testAi = new GoogleGenAI({
+        apiKey: keyToTest,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build-test' } },
+      });
+      const response = await testAi.models.generateContent({
+        model: testModel,
+        contents: 'Respond with valid JSON: {"status": "ok", "message": "verified"}',
+        config: { responseMimeType: 'application/json' },
+      });
+      const latencyMs = Date.now() - startTime;
+      return res.json({
+        success: true,
+        latencyMs,
+        modelUsed: testModel,
+        response: response.text,
+        message: `Verified! ${testModel} responded in ${latencyMs}ms.`,
+      });
+    } catch (err: any) {
+      lastErr = err;
+      const msg = err?.message || String(err);
+      if (msg.includes('404') || msg.includes('NOT_FOUND')) {
+        continue;
+      }
+      break;
+    }
+  }
+
+  {
+    const err = lastErr;
     const latencyMs = Date.now() - startTime;
     const errMsg = err?.message || String(err);
     const isQuotaExhausted =
@@ -1797,13 +1985,11 @@ Strict JSON Output Schema:
 }`;
 
     const userPrompt = `Category: ${category || 'General'}\nCurrent Headline: "${title || ''}"\nSummary: ${summary || ''}\nContent snippet: ${(content || '').slice(0, 800)}`;
-    const aiResult = await callGeminiWithFailover('gemini-3.8-flash', userPrompt, systemPrompt, 'application/json');
+    const aiResult = await callGeminiWithFailover('gemini-4-hydrogen', userPrompt, systemPrompt, 'application/json');
 
-    if (aiResult.text) {
-      try {
-        const parsed = JSON.parse(aiResult.text);
-        return res.json({ success: true, headlines: parsed });
-      } catch {}
+    const parsed = parseJsonSafe(aiResult.text);
+    if (parsed) {
+      return res.json({ success: true, headlines: parsed });
     }
 
     return res.json({
@@ -1848,13 +2034,11 @@ Output strict JSON with:
 }`;
 
     const userPrompt = `Headline: "${title || ''}"\nSummary: ${summary || ''}\nArticle Text:\n${(content || '').slice(0, 2500)}`;
-    const aiResult = await callGeminiWithFailover('gemini-3.8-flash', userPrompt, systemPrompt, 'application/json');
+    const aiResult = await callGeminiWithFailover('gemini-4-hydrogen', userPrompt, systemPrompt, 'application/json');
 
-    if (aiResult.text) {
-      try {
-        const parsed = JSON.parse(aiResult.text);
-        return res.json({ success: true, factCheck: parsed });
-      } catch {}
+    const parsed = parseJsonSafe(aiResult.text);
+    if (parsed) {
+      return res.json({ success: true, factCheck: parsed });
     }
 
     return res.json({
@@ -2073,7 +2257,11 @@ app.post('/api/fine-tuning', requireAdminAuth, (req, res) => {
   if (!update || typeof update !== 'object') {
     return res.status(400).json({ success: false, error: 'Invalid fine-tuning configuration' });
   }
-  fineTuningConfig = { ...fineTuningConfig, ...update };
+  fineTuningConfig = {
+    ...fineTuningConfig,
+    ...update,
+    selectedModel: normalizeGeminiModel(update.selectedModel ?? fineTuningConfig.selectedModel) as any,
+  };
   saveFineTuningConfig();
   res.json({ success: true, config: fineTuningConfig });
 });
@@ -2290,6 +2478,99 @@ app.post('/api/articles', requireAdminAuth, (req, res) => {
   res.json({ success: true, article });
 });
 
+app.get('/api/articles/audit-short', requireAdminAuth, (_req, res) => {
+  const shortArticles = articles
+    .filter((art) => isStubOrShortArticle(art))
+    .map((art) => ({
+      id: art.id,
+      slug: art.slug,
+      title: art.title,
+      category: art.category,
+      language: art.language,
+      status: art.status,
+      publishedAt: art.publishedAt,
+      wordCount: countWords(art.content),
+      isStubTemplate:
+        art.content.includes('Structural Paradigms and Institutional Mechanics') ||
+        art.content.includes('Structural Paradigms and Transitions'),
+    }));
+
+  res.json({
+    success: true,
+    totalArticles: articles.length,
+    shortCount: shortArticles.length,
+    shortArticles,
+  });
+});
+
+app.post('/api/articles/bulk-delete', requireAdminAuth, (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ success: false, error: 'Provide an array of article IDs to delete' });
+  }
+  const idSet = new Set<string>(ids);
+  const before = articles.length;
+  articles = articles.filter((a) => !idSet.has(a.id));
+  const deletedCount = before - articles.length;
+  saveArticles();
+  res.json({ success: true, deletedCount, remainingCount: articles.length });
+});
+
+app.post('/api/articles/:id/regenerate', requireAdminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const idx = articles.findIndex((a) => a.id === id);
+    if (idx < 0) {
+      return res.status(404).json({ success: false, error: 'Article not found' });
+    }
+    const existing = articles[idx];
+    const isGenericStubTitle =
+      existing.title.startsWith('The Definitive Guide to Modern ') ||
+      existing.title.startsWith('Global 24x7 Wire: Systemic Developments');
+
+    const synth = await synthesizeFullArticleWithAI({
+      category: existing.category,
+      topic: isGenericStubTitle ? undefined : existing.title,
+      isEvergreen: existing.isEvergreen,
+      targetWordCount: fineTuningConfig.targetWordCount || 950,
+      targetLanguage: existing.language === 'hi' ? 'hi' : 'en',
+      selectedModel: fineTuningConfig.selectedModel,
+      recentTitles: articles.filter((a) => a.id !== existing.id).slice(0, 12).map((a) => a.title),
+    });
+
+    if (!synth.success || !synth.data) {
+      return res.status(422).json({
+        success: false,
+        error: synth.error || 'Unable to regenerate full-length article. Check Gemini API keys.',
+      });
+    }
+
+    const updated: Article = {
+      ...existing,
+      title: synth.data.title || existing.title,
+      summary: synth.data.summary || existing.summary,
+      content: synth.data.content,
+      keyTakeaways: synth.data.keyTakeaways || existing.keyTakeaways,
+      tags: synth.data.tags || existing.tags,
+      readingTimeMinutes: Math.max(3, Math.ceil(synth.wordCount / 200)),
+      seo: synth.data.seo || existing.seo,
+    };
+
+    articles[idx] = updated;
+    saveArticles();
+    queueD1ArticleSync(updated);
+
+    return res.json({
+      success: true,
+      article: updated,
+      wordCount: synth.wordCount,
+      modelUsed: synth.modelUsed,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Regeneration failed' });
+  }
+});
+
 app.delete('/api/articles/:id', requireAdminAuth, (req, res) => {
   const { id } = req.params;
   articles = articles.filter((a) => a.id !== id);
@@ -2316,106 +2597,67 @@ app.post('/api/generate-article', requireAdminAuth, async (req, res) => {
       targetLanguage = 'en',
     } = req.body;
 
-    const chosenModel = fineTuning.selectedModel || 'gemini-3.8-flash';
-    const persona = fineTuning.writingPersona || 'investigative';
-    const formality = fineTuning.toneFormality || 4;
-    const depth = fineTuning.depthLevel || 4;
-    const targetWords = fineTuning.targetWordCount || 800;
-    const customDirectives = fineTuning.customSystemDirectives || '';
+    const chosenModel = normalizeGeminiModel(fineTuning.selectedModel || fineTuningConfig.selectedModel);
+    const persona = fineTuning.writingPersona || fineTuningConfig.writingPersona || 'investigative';
+    const formality = fineTuning.toneFormality || fineTuningConfig.toneFormality || 4;
+    const depth = fineTuning.depthLevel || fineTuningConfig.depthLevel || 4;
+    const targetWords = fineTuning.targetWordCount || fineTuningConfig.targetWordCount || 950;
+    const customDirectives = fineTuning.customSystemDirectives || fineTuningConfig.customSystemDirectives || '';
 
-    const systemPrompt = `You are a senior correspondent for "${branding.siteName}", an elite 24-hour broadsheet news publication.
-Category: "${category}".
+    const synth = await synthesizeFullArticleWithAI({
+      category,
+      topic,
+      targetWordCount: targetWords,
+      writingPersona: persona,
+      toneFormality: formality,
+      depthLevel: depth,
+      customDirectives,
+      targetLanguage: targetLanguage === 'hi' ? 'hi' : 'en',
+      selectedModel: chosenModel,
+    });
 
-Editorial Guidelines:
-- Persona: ${persona}
-- Formality: ${formality}/5
-- Depth: ${depth}/5
-- Target: approx ${targetWords} words
-- Structure:
-  1. Compelling headline in title case
-  2. 1-2 sentence executive summary
-  3. 3 bullet-point Key Takeaways
-  4. 4-6 detailed paragraphs with Markdown ## subheadings
-  5. 3-5 SEO tags
-  6. Meta description under 155 characters
-${customDirectives ? `\nSpecial Directives: ${customDirectives}` : ''}
-${targetLanguage === 'hi' ? '\nWrite completely in fluent, professional Hindi (हिन्दी) in Devanagari script.' : ''}
-
-Strict JSON schema:
-{
-  "title": "Headline",
-  "summary": "1-2 sentence summary",
-  "content": "Full article markdown with ## subheadings",
-  "keyTakeaways": ["Takeaway 1", "Takeaway 2", "Takeaway 3"],
-  "tags": ["Tag1", "Tag2"],
-  "readingTimeMinutes": 5,
-  "seo": {
-    "metaTitle": "SEO title",
-    "metaDescription": "SEO description under 155 chars",
-    "focusKeywords": ["keyword1"]
-  }
-}`;
-
-    const userPrompt = topic
-      ? `Write an in-depth investigative article about: "${topic}" in category: "${category}".`
-      : `Report on a critical emerging development in "${category}" suitable for today's front page.`;
-
-    const aiResult = await callGeminiWithFailover(
-      chosenModel,
-      userPrompt,
-      systemPrompt,
-      'application/json'
-    );
-
-    let generatedData: any = null;
-    if (aiResult.text) {
-      try {
-        generatedData = JSON.parse(aiResult.text);
-      } catch (e) {
-        console.error('Failed to parse AI output:', e);
-      }
+    if (!synth.success || !synth.data) {
+      return res.status(422).json({
+        success: false,
+        error: synth.error || 'AI synthesis failed minimum length check.',
+        message: synth.error || 'Please check Gemini API keys and quota in Admin AI Studio.',
+      });
     }
 
-    if (!generatedData) {
-      if (aiResult.error) {
-        return res.status(500).json({
-          success: false,
-          error: aiResult.error,
-          message: 'All API keys exhausted or unconfigured. Please check Admin AI Studio.',
-        });
-      }
-      generatedData = {
-        title: topic ? `Analysis: ${topic}` : `Strategic Transformations Across ${category} for 2026`,
-        summary: `A comprehensive dispatch evaluating systemic shifts and international implications across ${category}.`,
-        content: `The trajectory of ${category} has reached a pivotal juncture this quarter as regulatory frameworks and technical innovations converge.\n\n## Structural Paradigms and Transitions\nIndependent observers highlight how capital allocation and research priorities are shifting toward sustainable resilience.\n\n## Future Horizon\nAnalysts anticipate tangible milestones within the next eighteen months.`,
-        keyTakeaways: [
-          `Key institutional transition documented across ${category}.`,
-          'Capital allocation prioritizes verifiable sustainability.',
-          'Regulatory synchronization anticipated.',
-        ],
-        tags: [category, 'Global Trends', 'Policy'],
-        readingTimeMinutes: 4,
-        seo: {
-          metaTitle: `${category} Global Dispatch: Analysis & Strategic Horizons`,
-          metaDescription: `In-depth reporting on systemic transformations in ${category}.`,
-          focusKeywords: [category.toLowerCase()],
-        },
-      };
-    }
-
+    const generatedData = synth.data;
     const id = `art-${Date.now()}`;
-    const slug = (generatedData.title || 'article')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)+/g, '');
+    const slug = generateUniqueSlug(generatedData.title || 'article', articles);
 
     const imageMode = (req.body.imageMode || fineTuningConfig.imageGenerationMode || 'hybrid') as any;
-    const resolvedVisual = resolveArticleImage(
+    let resolvedVisual = resolveArticleImage(
       category,
       generatedData.title,
       generatedData.tags || [],
-      imageMode
+      imageMode,
+      generatedData.visualScenePrompt
     );
+
+    if ((imageMode === 'curated-press' || imageMode === 'hybrid') && generatedData.visualSearchKeywords?.length) {
+      try {
+        const searchTerms = generatedData.visualSearchKeywords.slice(0, 2).join(' ');
+        const wikiImages = await searchWikimediaPressImages(searchTerms, 3);
+        if (wikiImages.length > 0) {
+          const picked = wikiImages[0];
+          resolvedVisual = {
+            url: picked.url,
+            caption: picked.description || `${generatedData.title} — International Press Wire dispatch.`,
+            credit: {
+              photographer: picked.photographer,
+              source: 'Wikimedia Commons / Open Press Wire',
+              license: picked.license,
+              originalUrl: picked.pageUrl,
+            },
+            isAiGenerated: false,
+            sourceType: 'wikimedia',
+          };
+        }
+      } catch {}
+    }
 
     let finalImageUrl = resolvedVisual.url;
     try {
@@ -2442,7 +2684,7 @@ Strict JSON schema:
         title: `${category} Editorial Desk`,
       },
       publishedAt: new Date().toISOString(),
-      readingTimeMinutes: generatedData.readingTimeMinutes || 4,
+      readingTimeMinutes: Math.max(3, Math.ceil(synth.wordCount / 200)),
       status: req.body.autoPublish ? 'published' : 'draft',
       featuredRank: 3,
       imageUrl: finalImageUrl,
@@ -2465,8 +2707,9 @@ Strict JSON schema:
     res.json({
       success: true,
       article: newArticle,
-      modelUsed: chosenModel,
-      activeAccount: aiResult.accountUsed,
+      wordCount: synth.wordCount,
+      modelUsed: synth.modelUsed,
+      activeAccount: synth.accountUsed,
     });
   } catch (err: any) {
     console.error('Error in /api/generate-article:', err);
@@ -2490,7 +2733,7 @@ app.post('/api/translate-article', requireAdminAuth, async (req, res) => {
       });
     }
 
-    const prompt = `Translate this news article into fluent, authoritative journalistic Hindi (हिन्दी) in proper Devanagari script. Maintain broadsheet tone, exact subheadings (##), and journalistic precision.
+    const prompt = `Translate this complete news article into fluent, authoritative journalistic Hindi (हिन्दी) in proper Devanagari script. Maintain broadsheet tone, all exact subheadings (##), full length, and journalistic precision without truncating any paragraphs.
 
 Title: ${article.title}
 Summary: ${article.summary}
@@ -2506,32 +2749,24 @@ Respond in strict JSON:
 }`;
 
     const aiResult = await callGeminiWithFailover(
-      'gemini-3.8-flash',
+      'gemini-4-hydrogen',
       prompt,
       'You are a senior Hindi news translator and editor for Global 24x7.',
       'application/json'
     );
 
-    if (aiResult.text) {
-      try {
-        const parsed = JSON.parse(aiResult.text);
-        if (!article.translations) article.translations = {};
-        article.translations[targetLanguage] = parsed;
-        saveArticles();
-        return res.json({ success: true, translation: parsed, cached: false });
-      } catch {}
+    const parsed = parseJsonSafe(aiResult.text);
+    if (parsed && parsed.content) {
+      if (!article.translations) article.translations = {};
+      article.translations[targetLanguage] = parsed;
+      saveArticles();
+      return res.json({ success: true, translation: parsed, cached: false });
     }
 
-    const fallback = {
-      title: `[हिन्दी] ${article.title}`,
-      summary: article.summary,
-      keyTakeaways: article.keyTakeaways,
-      content: article.content,
-    };
-    if (!article.translations) article.translations = {};
-    article.translations[targetLanguage] = fallback;
-    saveArticles();
-    res.json({ success: true, translation: fallback, cached: false });
+    return res.status(422).json({
+      success: false,
+      error: aiResult.error || 'Hindi translation could not be completed. Check Gemini API key.',
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || 'Translation failed' });
   }

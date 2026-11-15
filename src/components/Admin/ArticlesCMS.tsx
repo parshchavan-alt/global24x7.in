@@ -102,6 +102,25 @@ export const ArticlesCMS: React.FC<ArticlesCMSProps> = ({
   const [isFactChecking, setIsFactChecking] = useState(false);
   const [factCheckReport, setFactCheckReport] = useState<FactCheckReport | null>(null);
 
+  // Short & Stub Article Audit / Repair modal
+  const [auditModalOpen, setAuditModalOpen] = useState(false);
+  const [repairingArticleId, setRepairingArticleId] = useState<string | null>(null);
+  const [isBulkRepairing, setIsBulkRepairing] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [auditStatus, setAuditStatus] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const getWordCount = (text?: string) => (text ? text.trim().split(/\s+/).filter(Boolean).length : 0);
+  const isShortOrStub = (art: Article) => {
+    const wc = getWordCount(art.content);
+    if (wc < 350) return true;
+    return (
+      art.content.includes('Structural Paradigms and Institutional Mechanics\nIndustry analysts') ||
+      art.content.includes('Structural Paradigms and Transitions\nIndependent observers')
+    );
+  };
+
+  const shortArticles = articles.filter(isShortOrStub);
+
   const filtered = articles.filter((art) => {
     if (categoryFilter !== 'All' && art.category !== categoryFilter) return false;
     if (!search.trim()) return true;
@@ -442,6 +461,131 @@ export const ArticlesCMS: React.FC<ArticlesCMSProps> = ({
     }
   };
 
+  // Short / Stub Article Audit & Repair Handlers
+  const handleRegenerateSingleStub = async (art: Article) => {
+    setRepairingArticleId(art.id);
+    setAuditStatus({ text: `Synthesizing full 800-1,200 word report for "${art.title.slice(0, 48)}..."`, type: 'info' });
+    try {
+      const res = await safeFetchJson<{
+        success: boolean;
+        article?: Article;
+        wordCount?: number;
+        error?: string;
+      }>(`/api/articles/${art.id}/regenerate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (res.ok && res.data?.success && res.data.article) {
+        onSaveArticle(res.data.article);
+        setAuditStatus({
+          text: `Expanded "${res.data.article.title}" to ${res.data.wordCount || getWordCount(res.data.article.content)} words.`,
+          type: 'success',
+        });
+      } else {
+        setAuditStatus({
+          text: res.data?.error || res.error || 'Regeneration failed. Check your Gemini API key in AI Tuning Studio.',
+          type: 'error',
+        });
+      }
+    } catch (err: any) {
+      setAuditStatus({ text: err.message || 'Regeneration request failed', type: 'error' });
+    } finally {
+      setRepairingArticleId(null);
+    }
+  };
+
+  const handleRegenerateAllStubs = async () => {
+    if (shortArticles.length === 0) return;
+    setIsBulkRepairing(true);
+    let repaired = 0;
+    const targets = [...shortArticles];
+
+    for (let i = 0; i < targets.length; i++) {
+      const target = targets[i];
+      setRepairingArticleId(target.id);
+      setAuditStatus({
+        text: `Regenerating ${i + 1} of ${targets.length}: "${target.title.slice(0, 45)}..."`,
+        type: 'info',
+      });
+      try {
+        const res = await safeFetchJson<{
+          success: boolean;
+          article?: Article;
+          wordCount?: number;
+          error?: string;
+        }>(`/api/articles/${target.id}/regenerate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        if (res.ok && res.data?.success && res.data.article) {
+          onSaveArticle(res.data.article);
+          repaired++;
+        } else {
+          setAuditStatus({
+            text: `Stopped after ${repaired} upgraded: ${res.data?.error || res.error || 'API key or quota issue.'}`,
+            type: 'error',
+          });
+          setRepairingArticleId(null);
+          setIsBulkRepairing(false);
+          return;
+        }
+      } catch (err: any) {
+        setAuditStatus({
+          text: `Stopped after ${repaired} upgraded: ${err.message}`,
+          type: 'error',
+        });
+        setRepairingArticleId(null);
+        setIsBulkRepairing(false);
+        return;
+      }
+    }
+
+    setRepairingArticleId(null);
+    setIsBulkRepairing(false);
+    if (onRefreshArticles) onRefreshArticles();
+    setAuditStatus({
+      text: `Successfully upgraded ${repaired} short articles to full-length dispatches.`,
+      type: 'success',
+    });
+  };
+
+  const handleBulkDeleteStubs = async () => {
+    if (shortArticles.length === 0) return;
+    if (!confirm(`Delete all ${shortArticles.length} short/stub articles under 350 words? Consider downloading a backup first.`)) {
+      return;
+    }
+    setIsBulkDeleting(true);
+    const ids = shortArticles.map((a) => a.id);
+    try {
+      const res = await safeFetchJson<{ success: boolean; deletedCount?: number; error?: string }>(
+        '/api/articles/bulk-delete',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids }),
+        }
+      );
+      if (res.ok && res.data?.success) {
+        ids.forEach((id) => onDeleteArticle(id));
+        if (onRefreshArticles) onRefreshArticles();
+        setAuditStatus({
+          text: `Removed ${res.data.deletedCount ?? ids.length} short/stub articles from the portal.`,
+          type: 'success',
+        });
+      } else {
+        setAuditStatus({
+          text: res.data?.error || res.error || 'Bulk deletion failed on server.',
+          type: 'error',
+        });
+      }
+    } catch (err: any) {
+      setAuditStatus({ text: err.message || 'Bulk deletion failed', type: 'error' });
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
   // Backup System Handlers
   const handleExportBackup = async () => {
     setIsBackingUp(true);
@@ -585,9 +729,28 @@ export const ArticlesCMS: React.FC<ArticlesCMSProps> = ({
             id="restore-backup-input"
           />
           <button
+            onClick={() => {
+              setAuditStatus(null);
+              setAuditModalOpen(true);
+            }}
+            className={`px-3 py-1.5 text-xs font-mono font-semibold rounded border flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer tabular-nums ${
+              shortArticles.length > 0
+                ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200'
+            }`}
+            title="Inspect and repair or delete short/stub articles under 350 words"
+          >
+            <AlertCircle className="w-3.5 h-3.5" />
+            <span>
+              {shortArticles.length > 0
+                ? `Repair Short Articles (${shortArticles.length})`
+                : 'Length Audit (All Full)'}
+            </span>
+          </button>
+          <button
             onClick={handleExportBackup}
             disabled={isBackingUp}
-            className="px-3 py-1.5 text-xs font-mono font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded border border-emerald-300 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+            className="px-3 py-1.5 text-xs font-mono font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded border border-emerald-300 flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
             title="Download full backup of all articles, categories, media, and settings to your computer"
           >
             <FileDown className="w-3.5 h-3.5" />
@@ -595,7 +758,7 @@ export const ArticlesCMS: React.FC<ArticlesCMSProps> = ({
           </button>
           <label
             htmlFor="restore-backup-input"
-            className="px-3 py-1.5 text-xs font-mono font-semibold bg-stone-100 hover:bg-stone-200 text-stone-800 rounded border border-stone-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="px-3 py-1.5 text-xs font-mono font-semibold bg-stone-100 hover:bg-stone-200 text-stone-800 rounded border border-stone-300 flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             title="Restore articles and settings from a previously downloaded .json backup"
           >
             <FileUp className="w-3.5 h-3.5" />
@@ -603,7 +766,7 @@ export const ArticlesCMS: React.FC<ArticlesCMSProps> = ({
           </label>
           <button
             onClick={handleCreateNew}
-            className="px-3 py-1.5 text-xs font-semibold bg-stone-900 text-white hover:bg-stone-800 rounded flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer shadow-xs"
+            className="px-3 py-1.5 text-xs font-semibold bg-stone-900 text-white hover:bg-stone-800 rounded flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>New Article</span>
@@ -679,6 +842,17 @@ export const ArticlesCMS: React.FC<ArticlesCMSProps> = ({
                     <td className="py-2.5 px-3 max-w-md">
                       <div className="font-semibold text-stone-900 line-clamp-1">{art.title}</div>
                       <div className="text-stone-500 text-[11px] line-clamp-1">{art.summary}</div>
+                      <div className="mt-0.5 flex items-center gap-2 text-[10px] font-mono tabular-nums">
+                        <span className={isShortOrStub(art) ? 'text-rose-700 font-semibold' : 'text-stone-400'}>
+                          {getWordCount(art.content)} words
+                        </span>
+                        {isShortOrStub(art) && (
+                          <>
+                            <span aria-hidden="true" className="text-stone-300">·</span>
+                            <span className="text-rose-700">Short / Stub</span>
+                          </>
+                        )}
+                      </div>
                     </td>
                     <td className="py-2.5 px-3">
                       <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-stone-100 text-stone-700 border border-stone-200">
@@ -1374,6 +1548,138 @@ export const ArticlesCMS: React.FC<ArticlesCMSProps> = ({
                       </div>
                     ))}
                 </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Short & Stub Article Audit & Repair Modal */}
+      {auditModalOpen && (
+        <div className="fixed inset-0 z-60 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#FBF9F5] rounded-lg max-w-4xl w-full max-h-[85vh] flex flex-col border border-stone-200 shadow-2xl p-6">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-200 mb-4">
+              <div>
+                <h4 className="text-base font-bold font-editorial-serif text-stone-900">
+                  Short &amp; Stub Article Audit
+                </h4>
+                <p className="text-xs text-stone-500 mt-0.5 tabular-nums">
+                  {shortArticles.length} of {articles.length} articles are under 350 words or match placeholder templates.
+                </p>
+              </div>
+              <button
+                onClick={() => setAuditModalOpen(false)}
+                className="p-1.5 text-stone-500 hover:text-stone-900 cursor-pointer"
+                aria-label="Close audit modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {auditStatus && (
+              <div
+                className={`p-3 rounded text-xs font-mono mb-4 border flex items-center justify-between ${
+                  auditStatus.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                    : auditStatus.type === 'error'
+                    ? 'bg-rose-50 border-rose-300 text-rose-900'
+                    : 'bg-stone-100 border-stone-300 text-stone-800'
+                }`}
+              >
+                <span>{auditStatus.text}</span>
+                <button
+                  onClick={() => setAuditStatus(null)}
+                  className="text-stone-400 hover:text-stone-700 ml-3 font-bold cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-stone-200 mb-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportBackup}
+                  disabled={isBackingUp}
+                  className="px-3 py-1.5 text-xs font-mono font-semibold bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 rounded flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+                >
+                  <FileDown className="w-3.5 h-3.5" />
+                  <span>Download Backup First</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRegenerateAllStubs}
+                  disabled={isBulkRepairing || isBulkDeleting || shortArticles.length === 0}
+                  className="px-3 py-1.5 text-xs font-mono font-semibold bg-stone-900 hover:bg-stone-800 text-white rounded flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isBulkRepairing ? 'animate-spin' : ''}`} />
+                  <span>{isBulkRepairing ? 'Upgrading Stubs...' : `Regenerate All (${shortArticles.length})`}</span>
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={handleBulkDeleteStubs}
+                disabled={isBulkDeleting || isBulkRepairing || shortArticles.length === 0}
+                className="px-3 py-1.5 text-xs font-mono font-semibold bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300 rounded flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isBulkDeleting ? 'Deleting...' : `Delete All Short (${shortArticles.length})`}</span>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto divide-y divide-stone-200 bg-white border border-stone-200 rounded">
+              {shortArticles.length === 0 ? (
+                <div className="py-12 text-center text-xs font-mono text-emerald-800">
+                  All published and draft articles meet the full broadsheet length threshold.
+                </div>
+              ) : (
+                shortArticles.map((art) => {
+                  const wc = getWordCount(art.content);
+                  const isRepairing = repairingArticleId === art.id;
+                  return (
+                    <div
+                      key={art.id}
+                      className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-stone-50/70"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm text-stone-900 truncate">{art.title}</div>
+                        <div className="flex items-center gap-2 text-[11px] font-mono text-stone-500 mt-1 tabular-nums">
+                          <span>{art.category}</span>
+                          <span aria-hidden="true">·</span>
+                          <span className="text-rose-700 font-semibold">{wc} words</span>
+                          <span aria-hidden="true">·</span>
+                          <span>{art.language.toUpperCase()}</span>
+                          <span aria-hidden="true">·</span>
+                          <span>/{art.slug}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleRegenerateSingleStub(art)}
+                          disabled={isRepairing || isBulkRepairing}
+                          className="px-3 py-1.5 text-xs font-mono font-semibold bg-stone-900 hover:bg-stone-800 text-white rounded flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+                        >
+                          <Sparkles className={`w-3.5 h-3.5 ${isRepairing ? 'animate-spin' : ''}`} />
+                          <span>{isRepairing ? 'Writing Full...' : 'Regenerate Full'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm(`Delete short article "${art.title}"?`)) {
+                              onDeleteArticle(art.id);
+                            }
+                          }}
+                          disabled={isRepairing || isBulkRepairing}
+                          className="p-1.5 text-rose-600 hover:bg-rose-50 border border-stone-200 rounded cursor-pointer disabled:opacity-50"
+                          title="Delete this stub"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>

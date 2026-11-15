@@ -127,9 +127,17 @@ export const AIFineTuningStudio: React.FC<AIFineTuningStudioProps> = ({
     setGeneratedArticle(null);
 
     try {
+      const normalizedModel =
+        config.selectedModel === 'gemini-4-hydrogen' ||
+        config.selectedModel === 'gemini-4-argon' ||
+        config.selectedModel === 'gemini-3.1-flash-lite'
+          ? config.selectedModel
+          : 'gemini-4-hydrogen';
+
       const res = await safeFetchJson<{
         success: boolean;
         article?: Article;
+        wordCount?: number;
         modelUsed?: string;
         activeAccount?: string;
         message?: string;
@@ -140,53 +148,58 @@ export const AIFineTuningStudio: React.FC<AIFineTuningStudioProps> = ({
         body: JSON.stringify({
           category: testCategory,
           topic: testTopic,
-          fineTuning: config,
+          fineTuning: { ...config, selectedModel: normalizedModel },
           autoPublish: false,
         }),
       });
 
       if (res.ok && res.data?.success && res.data.article) {
         setGeneratedArticle(res.data.article);
+        const wc = res.data.wordCount || res.data.article.content.trim().split(/\s+/).filter(Boolean).length;
         setStatusMessage(
-          `Synthesized via ${res.data.modelUsed || config.selectedModel || 'gemini-3.8-flash'} using ${
+          `Synthesized ${wc} words via ${res.data.modelUsed || normalizedModel} (${
             res.data.activeAccount || 'Active Account'
-          }.`
+          }).`
         );
         await fetchKeyPoolStatus();
         return;
       }
 
-      const localKeys = getLocalKeys();
-      const activeKey = localKeys[0]?.key;
-      if (activeKey) {
-        setStatusMessage('Connecting directly to Google Gemini via browser engine...');
-        const directResult = await generateArticleDirectly(
-          activeKey,
-          testCategory,
-          testTopic,
-          config.selectedModel || 'gemini-3.8-flash'
-        );
-        if (directResult.success && directResult.article) {
-          setGeneratedArticle(directResult.article);
-          setStatusMessage('✓ Synthesized successfully via Google Gemini client engine!');
-          return;
-        } else {
-          setIsError(true);
-          setStatusMessage(directResult.error || 'Direct synthesis failed. Please verify your Gemini API key.');
-          return;
+      // Only use browser-direct fallback if running on a static host without the Node server
+      if (res.isHtml || res.networkError) {
+        const localKeys = getLocalKeys();
+        const activeKey = localKeys[0]?.key;
+        if (activeKey) {
+          setStatusMessage('Connecting directly to Google Gemini via static-host engine...');
+          const directResult = await generateArticleDirectly(
+            activeKey,
+            testCategory,
+            testTopic,
+            normalizedModel
+          );
+          if (directResult.success && directResult.article) {
+            setGeneratedArticle(directResult.article);
+            const wc = directResult.article.content.trim().split(/\s+/).filter(Boolean).length;
+            setStatusMessage(`✓ Synthesized ${wc} words via static-host engine.`);
+            return;
+          } else {
+            setIsError(true);
+            setStatusMessage(directResult.error || 'Direct synthesis failed. Please verify your Gemini API key.');
+            return;
+          }
         }
       }
 
       setIsError(true);
       setStatusMessage(
-        res.data?.message ||
-          res.data?.error ||
+        res.data?.error ||
+          res.data?.message ||
           res.error ||
-          'Please enter a valid Gemini API key in the manager above first.'
+          'Synthesis failed. Please verify a valid Gemini API key is configured above.'
       );
     } catch (err: any) {
       setIsError(true);
-      setStatusMessage(`Synthesis note: ${err.message || 'Please check your API key'}`);
+      setStatusMessage(`Synthesis error: ${err.message || 'Please check your API key'}`);
     } finally {
       setIsGenerating(false);
     }
@@ -393,25 +406,31 @@ export const AIFineTuningStudio: React.FC<AIFineTuningStudioProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {[
               {
-                id: 'gemini-3.8-flash' as GeminiModel,
-                name: 'Gemini 3.8 Flash (Recommended)',
-                badge: 'Flagship Intelligence',
-                desc: 'Standard for broadsheet journalism, historical depth, and nuanced Hindi/English translation.',
+                id: 'gemini-4-hydrogen' as GeminiModel,
+                name: 'Gemini 4 Hydrogen (Recommended)',
+                badge: 'Flagship Broadsheet',
+                desc: 'Primary engine for 800-1,200 word investigative broadsheet reporting and Hindi/English translation.',
               },
               {
                 id: 'gemini-3.1-flash-lite' as GeminiModel,
                 name: 'Gemini 3.1 Flash Lite',
-                badge: 'Max Throughput',
-                desc: 'Ultra-low latency model for high-frequency wire reporting and rapid summary synthesis.',
+                badge: 'High Throughput',
+                desc: 'Low-latency backup engine for rapid wire dispatches and automatic failover rotation.',
               },
               {
-                id: 'gemini-flash-latest' as GeminiModel,
-                name: 'Gemini Flash Latest',
-                badge: 'General Release',
-                desc: 'Standard continuous release flash model for general-purpose publishing.',
+                id: 'gemini-4-argon' as GeminiModel,
+                name: 'Gemini 4 Argon',
+                badge: 'Deep Investigative',
+                desc: 'Extended reasoning model for complex macroeconomic, policy, and scientific pillar guides (requires billed key).',
               },
             ].map((m) => {
-              const active = (config.selectedModel || 'gemini-3.8-flash') === m.id;
+              const normalizedSelected =
+                config.selectedModel === 'gemini-4-hydrogen' ||
+                config.selectedModel === 'gemini-4-argon' ||
+                config.selectedModel === 'gemini-3.1-flash-lite'
+                  ? config.selectedModel
+                  : 'gemini-4-hydrogen';
+              const active = normalizedSelected === m.id;
               return (
                 <button
                   key={m.id}
@@ -693,8 +712,8 @@ export const AIFineTuningStudio: React.FC<AIFineTuningStudioProps> = ({
                 <span className="text-[10px] font-mono uppercase px-2 py-0.5 bg-stone-100 rounded text-stone-700 font-bold">
                   {generatedArticle.category}
                 </span>
-                <span className="text-[10px] font-mono text-stone-400">
-                  {generatedArticle.readingTimeMinutes} min read
+                <span className="text-[10px] font-mono text-stone-500 tabular-nums">
+                  {generatedArticle.content.trim().split(/\s+/).filter(Boolean).length} words · {generatedArticle.readingTimeMinutes} min read
                 </span>
               </div>
               <h4 className="font-editorial-serif font-bold text-sm text-stone-900 leading-snug">

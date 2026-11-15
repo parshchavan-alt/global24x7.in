@@ -139,22 +139,13 @@ export async function removeApiKeySafe(
 export async function testApiKeySafe(
   specificKey?: string
 ): Promise<{ success: boolean; message: string }> {
-  // If specificKey not provided, pick first available key from local storage
   let keyToTest = specificKey?.trim();
   if (!keyToTest) {
     const localKeys = getLocalKeys();
     keyToTest = localKeys[0]?.key;
   }
 
-  // 1. If key is available in browser, test directly with Google Gemini API
-  if (keyToTest) {
-    const directResult = await testGeminiKeyDirectly(keyToTest);
-    if (directResult.success) {
-      return directResult;
-    }
-  }
-
-  // 2. Try server test endpoint as fallback
+  // 1. Test via server endpoint first (keeps Gemini API calls server-side)
   const serverRes = await safeFetchJson<{ success: boolean; message?: string; error?: string }>('/api/keys/test', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -168,14 +159,14 @@ export async function testApiKeySafe(
     };
   }
 
-  // 3. If direct test gave a specific Google error message, return that
-  if (keyToTest) {
+  // 2. Only fall back to browser direct test if hosted on static site with no Node backend
+  if ((serverRes.isHtml || serverRes.networkError) && keyToTest) {
     const directResult = await testGeminiKeyDirectly(keyToTest);
     return directResult;
   }
 
   return {
     success: false,
-    message: serverRes.data?.message || serverRes.error || 'Please enter or save a Gemini API key first to test.',
+    message: serverRes.data?.message || serverRes.data?.error || serverRes.error || 'Please enter or save a Gemini API key first to test.',
   };
 }

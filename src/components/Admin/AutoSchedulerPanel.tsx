@@ -67,6 +67,7 @@ export const AutoSchedulerPanel: React.FC<AutoSchedulerPanelProps> = ({
     String(getInitialSchedulerConfig().frequencyMinutes || 60)
   );
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusIsError, setStatusIsError] = useState(false);
 
   const fetchSchedulerState = async () => {
     try {
@@ -144,7 +145,8 @@ export const AutoSchedulerPanel: React.FC<AutoSchedulerPanelProps> = ({
 
   const handleRunNow = async () => {
     setIsRunningCycle(true);
-    setStatusMessage('Initiating autonomous cycle on newsroom server...');
+    setStatusIsError(false);
+    setStatusMessage('Initiating full-length broadsheet synthesis on newsroom server...');
     try {
       let res = await safeFetchJson<{
         success: boolean;
@@ -177,46 +179,57 @@ export const AutoSchedulerPanel: React.FC<AutoSchedulerPanelProps> = ({
 
       if (res.ok && res.data?.success && res.data.article) {
         onArticleGenerated(res.data.article);
-        setStatusMessage(`Cycle complete! Published: "${res.data.article.title}"`);
+        const wc = res.data.article.content.trim().split(/\s+/).filter(Boolean).length;
+        setStatusIsError(false);
+        setStatusMessage(`Cycle complete (${wc} words): "${res.data.article.title}"`);
         fetchSchedulerState();
         return;
       }
 
-      const localKeys = getLocalKeys();
-      const activeKey = localKeys[0]?.key;
-      if (activeKey) {
-        setStatusMessage('Synthesizing scheduled article via client engine (Gemini 3.8 Flash)...');
-        const activeCats = config.categoriesInRotation?.length ? config.categoriesInRotation : categories.map((c) => c.name);
-        const randomCat = activeCats[Math.floor(Math.random() * activeCats.length)] || 'Technology';
-        const directResult = await generateArticleDirectly(activeKey, randomCat);
-        if (directResult.success && directResult.article) {
-          onArticleGenerated(directResult.article);
-          setStatusMessage(`Cycle complete! Published: "${directResult.article.title}" (Browser Engine)`);
-          const newLog: SchedulerExecutionLog = {
-            id: `log-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            category: randomCat,
-            title: directResult.article.title,
-            status: 'Success (Published)',
-            topicType: 'breaking',
-            language: 'en',
-            modelUsed: 'gemini-3.8-flash (Client)',
-            articleId: directResult.article.id,
-          };
-          setLogs((prev) => [newLog, ...prev]);
-          updateConfigOnServer({
-            articlesGeneratedCount: (config.articlesGeneratedCount || 0) + 1,
-            lastRunTimestamp: new Date().toISOString(),
-          });
-          return;
-        } else {
-          setStatusMessage(directResult.error || 'Cycle generation failed. Please verify API key.');
-          return;
+      // Static-host fallback only if Node backend is offline/unreachable
+      if (res.isHtml || res.networkError) {
+        const localKeys = getLocalKeys();
+        const activeKey = localKeys[0]?.key;
+        if (activeKey) {
+          setStatusMessage('Synthesizing scheduled article via static-host engine (Gemini 4 Hydrogen)...');
+          const activeCats = config.categoriesInRotation?.length ? config.categoriesInRotation : categories.map((c) => c.name);
+          const randomCat = activeCats[Math.floor(Math.random() * activeCats.length)] || 'Technology';
+          const directResult = await generateArticleDirectly(activeKey, randomCat, undefined, 'gemini-4-hydrogen');
+          if (directResult.success && directResult.article) {
+            onArticleGenerated(directResult.article);
+            const wc = directResult.article.content.trim().split(/\s+/).filter(Boolean).length;
+            setStatusIsError(false);
+            setStatusMessage(`Cycle complete (${wc} words): "${directResult.article.title}"`);
+            const newLog: SchedulerExecutionLog = {
+              id: `log-${Date.now()}`,
+              timestamp: new Date().toLocaleTimeString(),
+              category: randomCat,
+              title: directResult.article.title,
+              status: 'Success (Published)',
+              topicType: 'breaking',
+              language: 'en',
+              modelUsed: 'gemini-4-hydrogen',
+              articleId: directResult.article.id,
+            };
+            setLogs((prev) => [newLog, ...prev]);
+            updateConfigOnServer({
+              articlesGeneratedCount: (config.articlesGeneratedCount || 0) + 1,
+              lastRunTimestamp: new Date().toISOString(),
+            });
+            return;
+          }
         }
       }
 
-      setStatusMessage(res.error || res.data?.error || 'Please add a Gemini API key in the AI Tuning panel first.');
+      setStatusIsError(true);
+      setStatusMessage(
+        res.data?.error ||
+          res.error ||
+          'Cycle skipped without publishing stub: verify a valid Gemini API key is configured in AI Tuning Studio.'
+      );
+      fetchSchedulerState();
     } catch (err: any) {
+      setStatusIsError(true);
       setStatusMessage(err.message || 'Error triggering cycle');
     } finally {
       setIsRunningCycle(false);
@@ -307,7 +320,13 @@ export const AutoSchedulerPanel: React.FC<AutoSchedulerPanelProps> = ({
       </div>
 
       {statusMessage && (
-        <div className="p-3 bg-stone-100 border border-stone-300 rounded text-xs font-mono text-stone-800 flex items-center justify-between">
+        <div
+          className={`p-3 rounded text-xs font-mono flex items-center justify-between border ${
+            statusIsError
+              ? 'bg-rose-50 border-rose-300 text-rose-900'
+              : 'bg-stone-100 border-stone-300 text-stone-800'
+          }`}
+        >
           <span>{statusMessage}</span>
           <button
             onClick={() => setStatusMessage(null)}
@@ -711,7 +730,15 @@ export const AutoSchedulerPanel: React.FC<AutoSchedulerPanelProps> = ({
                   </span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-emerald-700 text-[11px]">{log.status}</span>
+                  <span
+                    className={`text-[11px] ${
+                      log.status.toLowerCase().includes('fail') || log.status.toLowerCase().includes('skip')
+                        ? 'text-rose-700 font-semibold'
+                        : 'text-emerald-700'
+                    }`}
+                  >
+                    {log.status}
+                  </span>
                 </div>
               </div>
             ))}

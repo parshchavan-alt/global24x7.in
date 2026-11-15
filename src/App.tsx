@@ -14,8 +14,6 @@ import {
 } from './types';
 import { INITIAL_CATEGORIES } from './data/seedArticles';
 import { getStoredArticles, persistArticle, removeArticle, saveArticlesToLocal } from './utils/articleStorage';
-import { getLocalKeys } from './utils/keyStorage';
-import { generateArticleDirectly } from './utils/geminiDirect';
 import { safeFetchJson } from './utils/apiSafe';
 import { PublicHeader } from './components/PublicHeader';
 import { FrontPage } from './components/FrontPage';
@@ -97,16 +95,22 @@ export function App() {
     const saved = localStorage.getItem('global24x7_fine_tuning');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        const rawModel = parsed?.selectedModel;
+        const normalizedModel =
+          rawModel === 'gemini-4-hydrogen' || rawModel === 'gemini-4-argon' || rawModel === 'gemini-3.1-flash-lite'
+            ? rawModel
+            : 'gemini-4-hydrogen';
+        return { ...parsed, selectedModel: normalizedModel };
       } catch {}
     }
     return {
-      selectedModel: 'gemini-3.8-flash',
+      selectedModel: 'gemini-4-hydrogen',
       writingPersona: 'investigative',
       toneFormality: 4,
       depthLevel: 4,
       neutralityLevel: 5,
-      targetWordCount: 800,
+      targetWordCount: 950,
       includeTakeaways: true,
       includeHistoricalContext: true,
       includeExpertQuotes: true,
@@ -518,53 +522,19 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Cadence Runner for autonomous publishing
+  // Periodic server feed sync so autonomous server cycles reflect in open tabs
   useEffect(() => {
-    let isGenerating = false;
     const interval = setInterval(async () => {
-      if (isGenerating) return;
-      let cfg: SchedulerConfig = schedulerConfig;
-      const savedCfg = localStorage.getItem('global24x7_scheduler_config');
-      if (savedCfg) {
-        try {
-          cfg = { ...schedulerConfig, ...JSON.parse(savedCfg) };
-        } catch {}
-      }
-      if (!cfg.enabled) return;
-      const keys = getLocalKeys();
-      if (!keys || keys.length === 0) return;
-
-      const now = Date.now();
-      const lastRunRaw = localStorage.getItem('global24x7_last_run_timestamp');
-      const lastRun = lastRunRaw ? parseInt(lastRunRaw, 10) : 0;
-      const frequencyMinutes = cfg.frequencyMinutes || 60;
-      const intervalMs = frequencyMinutes * 60 * 1000;
-
-      if (!lastRun || now - lastRun >= intervalMs) {
-        isGenerating = true;
-        localStorage.setItem('global24x7_last_run_timestamp', String(now));
-        const activeCats = cfg.categoriesInRotation?.length ? cfg.categoriesInRotation : categories.map((c) => c.name);
-        const randomCat = activeCats[Math.floor(Math.random() * activeCats.length)] || 'Technology';
-
-        try {
-          const directResult = await generateArticleDirectly(keys[0].key, randomCat);
-          if (directResult.success && directResult.article) {
-            setArticles((prev) => {
-              const updated = [directResult.article!, ...prev.filter((a) => a.id !== directResult.article!.id)];
-              saveArticlesToLocal(updated);
-              return updated;
-            });
-            logSecurityEvent('Autonomous Publishing', 'success', `Auto-published: "${directResult.article.title.slice(0, 35)}..."`);
-          }
-        } catch (genErr) {
-          console.warn('[Global 24x7 Engine] Background generation note:', genErr);
-        } finally {
-          isGenerating = false;
+      try {
+        const res = await safeFetchJson<{ success: boolean; articles?: Article[] }>('/api/articles');
+        if (res.ok && res.data?.success && Array.isArray(res.data.articles) && res.data.articles.length > 0) {
+          setArticles(res.data.articles);
+          saveArticlesToLocal(res.data.articles);
         }
-      }
-    }, 8000);
+      } catch {}
+    }, 30000);
     return () => clearInterval(interval);
-  }, [categories, schedulerConfig]);
+  }, []);
 
   // Inject custom CSS
   useEffect(() => {

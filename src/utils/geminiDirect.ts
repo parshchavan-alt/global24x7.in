@@ -19,8 +19,8 @@ export async function testGeminiKeyDirectly(apiKey: string): Promise<DirectTestR
     return { success: false, message: 'Please provide a valid Gemini API key' };
   }
 
-  // List of models to try for verification in order
-  const models = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+  // List of active Gemini models to try for verification in order
+  const models = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
   let lastErrorMessage = '';
 
   for (const model of models) {
@@ -35,9 +35,6 @@ export async function testGeminiKeyDirectly(apiKey: string): Promise<DirectTestR
               parts: [{ text: 'Respond with OK' }],
             },
           ],
-          generationConfig: {
-            maxOutputTokens: 10,
-          },
         }),
       });
 
@@ -87,10 +84,13 @@ export async function generateArticleDirectly(
   apiKey: string,
   category: string,
   topic?: string,
-  model = 'gemini-3.8-flash'
+  model = 'gemini-4-hydrogen'
 ): Promise<{ success: boolean; article?: Article; error?: string }> {
   try {
-    const isEvergreen = Math.random() > 0.4;
+    const activeModel =
+      model === 'gemini-3.8-flash' || model === 'gemini-flash-latest'
+        ? 'gemini-4-hydrogen'
+        : model;
     const cat = category || 'Technology';
     const specificTopic = topic?.trim() || `${cat} breakthrough and industry transformation`;
 
@@ -99,12 +99,13 @@ Synthesize a comprehensive, authoritative, deeply researched news article in Eng
 Category: ${cat}
 Topic/Focus: ${specificTopic}
 Style: High-credibility, rigorous, dynamic, journalistic narrative.
+Target Length: 850 to 1,150 words across 5 to 7 detailed analytical sections with Markdown ## subheadings. Do not write a brief summary; write a complete broadsheet dispatch.
 
 You MUST respond strictly with valid JSON with this exact schema (no markdown fences, just pure JSON):
 {
   "title": "Compelling, journalistic headline under 95 characters",
   "summary": "1-2 sentence executive briefing overview under 220 characters",
-  "content": "Full in-depth markdown article (at least 450 words) with ## Subheadings, analytical depth, expert perspectives, and global context",
+  "content": "Full in-depth markdown article (850-1150 words, minimum 500 words) with 5+ ## Subheadings, concrete analysis, real-world mechanisms, and global context",
   "keyTakeaways": [
     "Key strategic takeaway 1",
     "Key strategic takeaway 2",
@@ -119,12 +120,15 @@ You MUST respond strictly with valid JSON with this exact schema (no markdown fe
   }
 }`;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${apiKey.trim()}`;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+        },
       }),
     });
 
@@ -140,8 +144,19 @@ You MUST respond strictly with valid JSON with this exact schema (no markdown fe
       return { success: false, error: 'Empty output from Gemini model' };
     }
 
-    const cleaned = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(cleaned);
+    const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    const jsonSlice = firstBrace >= 0 && lastBrace > firstBrace ? cleaned.slice(firstBrace, lastBrace + 1) : cleaned;
+    const parsed = JSON.parse(jsonSlice);
+
+    const wordCount = (parsed.content || '').trim().split(/\s+/).filter(Boolean).length;
+    if (wordCount < 350) {
+      return {
+        success: false,
+        error: `Generated article was too short (${wordCount} words). Minimum 350 words required.`,
+      };
+    }
 
     const slug = (parsed.title || 'dispatch')
       .toLowerCase()
@@ -165,7 +180,7 @@ You MUST respond strictly with valid JSON with this exact schema (no markdown fe
         title: `${cat} Senior Correspondent`,
       },
       publishedAt: new Date().toISOString(),
-      readingTimeMinutes: parsed.readingTimeMinutes || 4,
+      readingTimeMinutes: Math.max(3, Math.ceil(wordCount / 200)),
       status: 'published',
       featuredRank: 2,
       imageUrl: resolvedVisual.url,
@@ -174,7 +189,7 @@ You MUST respond strictly with valid JSON with this exact schema (no markdown fe
       language: 'en',
       viewsCount: 1,
       likesCount: 0,
-      isEvergreen,
+      isEvergreen: false,
       seo: parsed.seo || {
         metaTitle: `${parsed.title} | Global 24x7`,
         metaDescription: parsed.summary,

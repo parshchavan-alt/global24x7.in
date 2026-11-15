@@ -57,9 +57,9 @@ export interface Article {
 }
 
 export type GeminiModel =
-  | 'gemini-3.8-flash'
-  | 'gemini-3.1-flash-lite'
-  | 'gemini-flash-latest';
+  | 'gemini-4-hydrogen'
+  | 'gemini-4-argon'
+  | 'gemini-3.1-flash-lite';
 
 export interface AIFineTuningConfig {
   selectedModel: GeminiModel;

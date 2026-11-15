@@ -1,5 +1,26 @@
 [
   {
+    "id": "log-1794726618695",
+    "timestamp": "7:10:18 AM",
+    "category": "General",
+    "title": "Manual Cycle Failed: {\"error\":{\"code\":400,\"message\":\"API key not valid. Please pass a valid API key.\",\"status\":\"INVA",
+    "status": "Failed (Skipped — No Stub Published)",
+    "topicType": "breaking",
+    "language": "en",
+    "modelUsed": "gemini-4-hydrogen"
+  },
+  {
+    "id": "log-1794726360871",
+    "timestamp": "7:06:00 AM",
+    "category": "Economy",
+    "title": "The Definitive Guide to Modern Economy: Systems, Dynamics & Strategic Frameworks",
+    "status": "Published Directly to Portal",
+    "topicType": "evergreen",
+    "language": "en",
+    "modelUsed": "gemini-3.8-flash",
+    "articleId": "art-1794726359773"
+  },
+  {
     "id": "log-1792225707666",
     "timestamp": "8:28:27 AM",
     "category": "Technology",

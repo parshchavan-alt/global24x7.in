@@ -1,0 +1,12 @@
+{
+  "selectedModel": "gemini-4-hydrogen",
+  "writingPersona": "investigative",
+  "toneFormality": 4,
+  "depthLevel": 4,
+  "neutralityLevel": 5,
+  "targetWordCount": 800,
+  "includeTakeaways": true,
+  "includeHistoricalContext": true,
+  "includeExpertQuotes": true,
+  "customSystemDirectives": "Deliver authoritative reporting matching elite broadsheet standards in English and Hindi. No colloquialisms, no sensationalism."
+}
